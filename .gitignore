@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+venv/
+env/
+.venv/
+instance/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+*.sqlite3
+# Editor
+.vscode/
+.idea/
+.DS_Store
+# Render
+render.yaml
