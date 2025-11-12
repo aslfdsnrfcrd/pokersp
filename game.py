@@ -328,16 +328,22 @@ class Game:
         return False, "Azione non riconosciuta"
 
     # --- AGGIUNTA: Visualizzazione dello stato del tavolo ---
-    def print_table(self, reveal_all=False):
-        print("=" * 40)
-        print(f"Stato: {self.stage}, Pot: {self.pot}, Dealer: {self.dealer_idx}")
-        print("Community cards:")
-        print("  " + " ".join([repr(c) for c in self.community]))
-        print()
-        print("Giocatori:")
-        for idx, p in enumerate(self.players):
-            hole_cards = " ".join([repr(c) for c in p.hole]) if (reveal_all or self.stage == "showdown") else "XX XX"
-            marker = "<-" if idx == self.turn_idx else ""
-            status = "All-in" if p.all_in else ("Fold" if not p.in_hand else "")
-            print(f"[{idx}] {p.name} ({p.chips} chips): {hole_cards} | Bet: {p.current_bet} {marker} {status}")
-        print("=" * 40)
+def print_table(self, reveal_all=False, player_id=None):
+    print("=" * 40)
+    print(f"Stato: {self.stage}, Pot: {self.pot}, Dealer: {self.dealer_idx}")
+    print("Community cards:")
+    print("  " + " ".join([repr(c) for c in self.community]))
+    print()
+    print("Giocatori:")
+    for idx, p in enumerate(self.players):
+        # Mostra le carte solo al proprio giocatore (o tutte in showdown)
+        if reveal_all or self.stage == "showdown":
+            hole_cards = " ".join([repr(c) for c in p.hole])
+        elif player_id is not None and p.id == player_id:
+            hole_cards = " ".join([repr(c) for c in p.hole])
+        else:
+            hole_cards = "XX XX"
+        marker = "<-" if idx == self.turn_idx else ""
+        status = "All-in" if p.all_in else ("Fold" if not p.in_hand else "")
+        print(f"[{idx}] {p.name} ({p.chips} chips): {hole_cards} | Bet: {p.current_bet} {marker} {status}")
+    print("=" * 40)
