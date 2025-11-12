@@ -48,7 +48,8 @@ class Player:
             "in_hand": self.in_hand,
             "current_bet": self.current_bet,
             "all_in": self.all_in,
-            "hole": [c.to_dict() for c in self.hole] if reveal else (len(self.hole) * ["XX"])
+            "hole": [repr(c) for c in self.hole] if reveal else (len(self.hole) * ["XX"])
+            
         }
 
 # Simple evaluator used only for showdown — same idea as CLI version but simplified
