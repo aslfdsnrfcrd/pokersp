@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 import random
 import itertools
@@ -228,7 +227,7 @@ class Game:
 
     def advance_stage(self):
         # Metti tutte le current_bet nel pot
-        total_bets = sum(p.current_bet for p in self.players)
+        total_bets = sum(p.current_bet for p in self.players if p.in_hand) # <--- CORREZIONE 1: Aggiunto filtro in_hand
         self.pot += total_bets
         
         if self.stage == "preflop":
@@ -278,16 +277,16 @@ class Game:
 
     def next_active_idx(self, start):
         n = len(self.players)
-        # Cerca il prossimo giocatore attivo (in_hand AND non all_in)
+        # Cerca il prossimo giocatore che DEVE agire (in_hand AND non all_in AND current_bet < self.current_bet)
         for i in range(1, n + 1):
             idx = (start + i) % n
             p = self.players[idx]
-            # Giocatore è attivo se è in mano E deve ancora agire
+            # Giocatore è attivo se è in mano E deve ancora eguagliare la puntata (o agire come primo)
             if p.in_hand and not p.all_in and p.current_bet < self.current_bet:
                 return idx
         
-        # Se non c'è nessuno che deve agire per chiamare la puntata,
-        # cerca il primo non-fold/non-all-in come punto di partenza per il CHECK/BET
+        # Se self.current_bet == 0 (all'inizio di Flop/Turn/River) o tutti hanno chiamato/foldato/all-in
+        # cerca il primo non-fold/non-all-in per consentire check/bet
         if self.current_bet == 0:
              for i in range(1, n + 1):
                 idx = (start + i) % n
@@ -298,38 +297,20 @@ class Game:
         return None
 
     def is_betting_round_over(self):
-        active_in_hand = [p for p in self.players if p.in_hand and not p.all_in]
+        # Un giro di puntate è finito se:
+        # 1. Tutti i giocatori in mano (anche all-in) sono pari alla puntata massima
+        # 2. Ci sono almeno due giocatori in mano
         
-        # Se tutti gli attivi hanno foldato, è finita
-        if not active_in_hand:
-            return True # Verrà gestito da all_but_one_folded
-        
-        # 1. Tutti i giocatori attivi (non fold/non all-in) devono avere la stessa current_bet
-        if not all(p.current_bet == self.current_bet for p in active_in_hand):
-            return False
-            
-        # 2. Tutti devono aver avuto l'opportunità di agire dopo l'ultimo raiser (o buio)
-        # Questo è complesso da gestire con last_raiser_idx.
-        # Semplificazione: se il turno è tornato all'ultimo raiser (o chi era alla sua sx)
-        # E tutti gli altri hanno chiamato/foldato/all-in
-        
-        # Se self.current_bet > 0, il giro finisce quando il turno torna all'ultimo raiser
-        # che è ancora in mano (escluso se è all-in)
-        
-        # La logica del tuo `player_action` che avanza il turno finché tutti hanno agito
-        # può essere mantenuta, ma la condizione di fine è:
-        # Quando il prossimo giocatore da agire (next_active_idx) è NESSUNO.
-        
-        # Controlla solo se tutti i giocatori in mano (anche all-in) sono pari alla puntata massima
-        # O se sono all-in
-        for p in self.players:
-            if p.in_hand and p.current_bet < self.current_bet and p.chips > 0:
-                return False # C'è un giocatore che deve ancora chiamare
-                
-        # Controlla che almeno due giocatori siano rimasti per avanzare (non essenziale, ma aiuta)
-        if self.stage != "preflop" and len([p for p in self.players if p.in_hand]) < 2:
+        # Se c'è solo un giocatore in mano, è finita
+        if self.all_but_one_folded():
             return True
-            
+
+        for p in self.players:
+            # Se è in mano e non è all-in E non ha eguagliato la puntata massima, DEVE ancora agire.
+            if p.in_hand and not p.all_in and p.current_bet < self.current_bet:
+                return False 
+                
+        # Se si è qui, tutti sono o pari o all-in. Il giro è finito.
         return True
 
 
@@ -340,7 +321,7 @@ class Game:
     # Nota: Questa funzione non gestisce le Side Pot, assegna solo il piatto principale.
     def collect_pots_and_award(self):
         # Metti tutte le current_bet rimanenti nel pot finale
-        total_bets = sum(p.current_bet for p in self.players)
+        total_bets = sum(p.current_bet for p in self.players if p.in_hand) # <--- CORREZIONE 1: Aggiunto filtro in_hand
         self.pot += total_bets
         
         inplay = [p for p in self.players if p.in_hand]
@@ -406,7 +387,8 @@ class Game:
                 return True, "Hai foldato. Altri hanno foldato, mano terminata."
             
             # Avanza il turno
-            nxt = self.next_active_idx(self.turn_idx)
+            # CORREZIONE 2: Logica di avanzamento corretta
+            nxt = self.next_active_idx(self.turn_idx) 
             if nxt is None:
                  # Se foldando il giro è finito (tutti gli altri hanno chiamato/sono all-in)
                 self.advance_stage()
@@ -420,8 +402,8 @@ class Game:
                 return False, "Non puoi checkare se c'è da chiamare"
             
             # Avanza il turno
-            # Controlla se il giro è finito (il prossimo è None)
-            nxt = self.next_active_idx(self.turn_idx)
+            # CORREZIONE 2: Logica di avanzamento corretta
+            nxt = self.next_active_idx(self.turn_idx) 
             
             if nxt is None:
                 self.advance_stage()
@@ -438,13 +420,14 @@ class Game:
             
             p.chips -= put
             p.current_bet += put
-            self.pot += put # Verrà trasferito nel pot principale alla fine del round
+            # self.pot += put # Rimosso, viene fatto in advance_stage
             
             if p.chips == 0:
                 p.all_in = True
 
             # Avanza il turno
-            nxt = self.next_active_idx(self.turn_idx)
+            # CORREZIONE 2: Logica di avanzamento corretta
+            nxt = self.next_active_idx(self.turn_idx) 
 
             if nxt is None:
                 self.advance_stage()
@@ -456,42 +439,32 @@ class Game:
         if action == "raise":
             min_raise = self.current_bet + self.bb
             
-            # Calcola la puntata totale che il giocatore deve mettere (non solo l'incremento)
-            total_bet_required = p.current_bet + amount
-            
-            # Controllo: Se amount è solo l'incremento, deve essere almeno la BB o il precedente rilancio.
-            # Qui si suppone che 'amount' sia il *totale* che il giocatore sta puntando.
-            # Ma il tuo codice lo usa come *incremento* rispetto alla puntata attuale. Aderiamo a questo.
-            
             if amount <= 0:
                  return False, "Specifica un importo di rilancio valido."
             
-            # L'incremento del rilancio deve essere almeno il BB (o il rilancio precedente)
-            min_inc = self.bb
-            if self.current_bet > self.bb:
-                # Trova il precedente rilancio effettivo (o BB)
-                previous_bet = self.players[self.last_raiser_idx].current_bet if self.last_raiser_idx != -1 else 0
-                min_inc = self.current_bet - previous_bet
-
-            if amount < min_inc and amount < p.chips: # Solo se non è un all-in
-                 return False, f"Il rilancio minimo deve essere di almeno {min_inc} in più del 'call'."
-            
+            to_call = self.current_bet - p.current_bet
             to_put = to_call + amount # Totale da mettere = Call + Incremento
             
+            # L'incremento del rilancio deve essere almeno il BB (o il rilancio precedente)
+            min_inc = self.bb
+            if self.current_bet > 0:
+                # Se è già stata piazzata una scommessa, il rilancio deve essere pari all'ultimo rilancio
+                last_raise_amount = self.current_bet - (self.players[self.last_raiser_idx].current_bet if self.last_raiser_idx != -1 else 0)
+                min_inc = last_raise_amount
+            
+            # Controllo se l'incremento è valido (solo se non è un all-in)
+            if amount < min_inc and to_put < p.chips:
+                 return False, f"L'incremento del rilancio deve essere di almeno {min_inc}."
+            
+            
+            # All-in
             if to_put >= p.chips:
-                # All-in
                 to_put = p.chips
                 p.all_in = True
-                new_bet = p.current_bet + to_put
-                # Controlla se l'all-in è un rilancio valido o solo una chiamata incompleta
-                if new_bet < min_raise and new_bet > self.current_bet:
-                    # Rilancio inferiore al minimo (ma comunque un'azione valida in Hold'em)
-                    # Non riapre la possibilità di rilanciare agli altri, ma lasciamo la logica semplice per ora.
-                    pass 
-                
+            
             p.chips -= to_put
             p.current_bet += to_put
-            self.pot += to_put
+            # self.pot += to_put # Rimosso, viene fatto in advance_stage
             
             # Aggiorna la puntata corrente del tavolo solo se è maggiore
             if p.current_bet > self.current_bet:
@@ -499,6 +472,7 @@ class Game:
                 self.last_raiser_idx = self.turn_idx
             
             # Avanza il turno (ricomincia il giro dal prossimo attivo)
+            # CORREZIONE 2: Logica di avanzamento corretta
             nxt = self.next_active_idx(self.turn_idx)
             
             if nxt is None:
@@ -567,10 +541,8 @@ def main():
         name = input(f"Inserisci il nome del Giocatore {i+1}: ")
         player_names.append(name)
     
-    player_ids = {}
     for name in player_names:
-        player_id = game.add_player(name)
-        player_ids[name] = player_id
+        game.add_player(name)
 
     # Ciclo di gioco principale
     hand_num = 1
@@ -589,10 +561,11 @@ def main():
             break
         
         # Ciclo di puntate (fino a showdown o fold)
-        while game.started and game.stage != "showdown":
+        while game.started and game.stage != "showdown" and not game.all_but_one_folded():
             print(f"\n--- Fase: {game.stage.upper()} ---")
             
             # Trova l'ID del giocatore di turno per mostrare solo le sue carte
+            if not game.started: break
             turn_player_id = game.players[game.turn_idx].id
             game.print_table(player_id=turn_player_id)
 
@@ -618,8 +591,7 @@ def main():
                 if to_call == 0:
                     action_prompt = f"Azione (check / bet <importo> / fold): "
                 else:
-                    max_raise = current_player.chips - to_call
-                    action_prompt = f"Azione (call {to_call} / raise <incremento> (min: {game.bb}) / fold): "
+                    action_prompt = f"Azione (call {to_call} / raise <incremento> / fold): "
                 
                 action_input = input(action_prompt).strip().split()
                 if not action_input:
@@ -650,15 +622,11 @@ def main():
                 else:
                     print("Azione non riconosciuta (usa fold, check, call o raise/bet <importo>).")
 
-            # Check se il betting round è terminato dopo l'azione valida
-            if game.is_betting_round_over():
+            # Dopo l'azione, se il betting round è terminato, avanza la fase
+            if game.is_betting_round_over() and game.started:
                  game.advance_stage()
             
-            # Dopo l'azione, se la mano è ancora in corso e il giro è finito, avanza la fase
-            # La logica è già in player_action e advance_stage, ma la condizione is_betting_round_over
-            # può essere chiamata qui per forzare l'avanzamento se il giro è completato.
-            
-        # Assegnazione del piatto dopo lo showdown o il fold di tutti
+        # Assegnazione del piatto
         if not game.started or game.stage == "showdown":
             if game.started:
                  print("\n--- SHOWDOWN ---")
@@ -671,7 +639,6 @@ def main():
             for result in winners:
                 print(f"- **{result['winner_name']}** vince **{result['amount']}** fiches con un **{result['hand']}**.")
             
-            # Il dealer_idx è stato aggiornato in advance_stage o collect_pots_and_award
             hand_num += 1
 
     print("\n\n--- PARTITA TERMINATA ---")
