@@ -165,7 +165,7 @@ class Game:
         self.pot=0
         self.dealer_idx=0
         self.current_bet=0
-        self.turn_idx=0
+        self.turn_idx=-1 # Inizializza a -1 per non avere turni attivi
         self.started=False
         self.stage="waiting"
         self.last_raiser_idx=-1
@@ -193,7 +193,7 @@ class Game:
         self.community = []
         self.pot = 0
         self.current_bet = 0
-        self.turn_idx = 0
+        self.turn_idx = -1 # Reset del turno
         self.started = False
         self.stage = "waiting"
         self.last_raiser_idx = -1
@@ -283,8 +283,9 @@ class Game:
         turn_name = None
 
         # FIX: Controlliamo esplicitamente l'indice e lo stato
+        # turn_idx deve essere un indice valido (>=0) e la fase non deve essere showdown
         if (self.players and self.started and self.stage!="showdown" and 
-            self.turn_idx!=-1 and 0 <= self.turn_idx < len(self.players)):
+            0 <= self.turn_idx < len(self.players)):
             
             turn_player = self.players[self.turn_idx]
             turn_id = turn_player.id
@@ -344,8 +345,12 @@ class Game:
         if self.current_bet == 0 and self.stage != "preflop":
             next_idx = self.get_next_player_in_hand_idx(self.turn_idx)
             # Se il prossimo è l'iniziatore (il ciclo è completo)
+            # Nota: se l'iniziatore è stato l'unico ad agire, il ciclo è completo.
             if next_idx == self.initial_bet_round_starter_idx:
                 return True
+            # Se nessuno deve agire (tutti check), e siamo tornati al first_to_act_post_flop, è finita.
+            elif next_idx == -1 and self.turn_idx == self.initial_bet_round_starter_idx:
+                 return True
             else:
                 return False
                 
@@ -387,6 +392,7 @@ class Game:
             # La mano è finita, assegna i piatti e imposta il flag risolto
             results = self.collect_pots_and_award()
             self.is_hand_resolved = True 
+            # Non impostiamo turn_idx a -1 qui, lo facciamo nel chiamante (check_and_advance_stage_if_round_over)
             return True, f"Showdown! Risultati: {results}"
 
         # Determina il primo giocatore ad agire post-flop
@@ -415,6 +421,7 @@ class Game:
             self.flush_current_bets_to_pot()
             results=self.collect_pots_and_award()
             self.is_hand_resolved = True 
+            self.turn_idx = -1 # <--- FIX: Resetta il turno quando la mano è risolta
             return True,f"{action_description}. Mano terminata per fold. Risultati:{results}"
 
         # 2. Caso Round Terminati (tutti chiamati/checkati)
@@ -422,6 +429,9 @@ class Game:
             # Avanza di fase e gestisci il risultato se Showdown
             result_tuple = self.advance_stage()
             if result_tuple:
+                # Se la mano è andata a showdown, resettiamo l'indice del turno
+                if self.stage == "showdown":
+                    self.turn_idx = -1 # <--- FIX: Resetta il turno quando la mano è risolta
                 return result_tuple 
             else:
                 return True, action_description + f". Avanzamento a {self.stage}"
@@ -433,7 +443,7 @@ class Game:
             self.turn_idx = next_idx
             return True, action_description
         else:
-            # Fallback: se is_betting_round_over non l'ha catturato, forziamo l'avanzamento.
+            # Fallback (dovrebbe essere gestito da is_betting_round_over/advance_stage)
             return self.advance_stage() or (True, action_description + ". Avanzamento di fase forzato.")
 
     def player_action(self,player_id,action,amount=0)->Tuple[bool,str]:
@@ -442,6 +452,11 @@ class Game:
         if not p.in_hand: return False,"Hai già foldato"
         if not self.started: return False,"Mano non iniziata"
         if self.stage=="showdown" or self.is_hand_resolved: return False,"La mano è finita (showdown), avviare la prossima."
+        
+        # Controllo indice valido prima di accedere a self.players
+        if not (0 <= self.turn_idx < len(self.players)):
+            return False,"Errore di stato: Turno non valido (indice fuori limite)"
+            
         if self.players[self.turn_idx].id!=player_id: return False,"Non è il tuo turno"
         if p.all_in: return False,"Sei All-in, non puoi agire"
         
@@ -460,7 +475,9 @@ class Game:
             
         # --- CALL ---
         if action=="call":
-            if to_call<=0: return False,"Non c'è nulla da chiamare o da puntare"
+            if to_call<=0 and self.current_bet>0: return False,"Non c'è nulla da chiamare"
+            if to_call<0: to_call=0 # Assicura che to_call sia almeno 0 se current_bet era 0
+            
             put=min(to_call,p.chips)
             
             p.chips-=put
@@ -483,9 +500,11 @@ class Game:
 
             new_raise_amount = total_bet_to_be - self.current_bet
             
+            # Se non è All-in, deve rispettare il min_raise
             if new_raise_amount < min_raise_required and total_put < p.chips:
-                 return False, f"Raise troppo piccolo. Il rilancio deve essere almeno {min_raise_required} oltre la puntata corrente."
+                 return False, f"Raise troppo piccolo. Il rilancio deve essere almeno {min_raise_required} oltre la puntata corrente ({self.current_bet})."
                  
+            # Gestione All-in
             if total_put >= p.chips:
                 total_put = p.chips
                 total_bet_to_be = p.current_bet + total_put
@@ -497,7 +516,9 @@ class Game:
 
             if p.chips==0: p.all_in=True
             
+            # Aggiornamento puntata corrente e raiser solo se c'è stato un vero raise
             if p.current_bet>old_current_bet:
+                # Il nuovo raise è la differenza tra la nuova puntata e la vecchia puntata massima
                 self.last_raise_amount=p.current_bet-old_current_bet
                 self.current_bet=p.current_bet
                 self.last_raiser_idx=self.turn_idx
