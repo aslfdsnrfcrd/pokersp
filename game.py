@@ -15,7 +15,6 @@ HAND_RANKS = [
 
 # --- Utility ---
 def normalize_rank(r: str) -> str:
-    """Accetta anche '10' e lo mappa a 'T' internamente."""
     r = str(r).upper()
     if r == "10":
         return "T"
@@ -32,7 +31,6 @@ class Card:
         self.value = RANK_VALUE[rank]
 
     def __repr__(self):
-        # Rappresenta 10 come "10" per leggibilità, ma mantiene internamente 'T'
         rank_str = "10" if self.rank == "T" else self.rank
         return f"{rank_str}{self.suit}"
 
@@ -54,18 +52,10 @@ class Player:
         self.id = str(uuid4())[:8]
         self.name = name
         self.chips = 1000
-        # PRIVATE storage delle hole cards (uso _hole internamente)
-        self._hole: List[Card] = []
+        self.hole: List[Card] = []
         self.in_hand = True
         self.current_bet = 0
         self.all_in = False
-
-    # Metodo per ottenere le carte pubbliche (mascherate o rivelate)
-    def hole_public(self, reveal: bool = False) -> List[str]:
-        if reveal:
-            return [repr(c) for c in self._hole]
-        # maschera in base al numero di carte (2) per compatibilità client
-        return ["XX"] * len(self._hole)
 
     def to_public(self, reveal=False):
         return {
@@ -75,19 +65,18 @@ class Player:
             "in_hand": self.in_hand,
             "current_bet": self.current_bet,
             "all_in": self.all_in,
-            "hole": self.hole_public(reveal=reveal)
+            "hole": [repr(c) for c in self.hole] if reveal else (len(self.hole) * ["XX"])
         }
 
-# --- Funzioni di Valutazione ---
+# --- Funzioni di valutazione Texas Hold'em ---
 def is_straight(values):
     vals = sorted(set(values), reverse=True)
-    # A-5 low straight (Aces are 1 or 14)
     if 14 in vals:
         vals.append(1)
     for i in range(len(vals) - 4):
         window = vals[i:i + 5]
         if len(window) == 5 and all(window[j] - window[j + 1] == 1 for j in range(4)):
-            return window[0]  # Ritorna la carta alta della scala
+            return window[0]
     return None
 
 def evaluate_5cards(cards: List[Card]):
@@ -96,7 +85,6 @@ def evaluate_5cards(cards: List[Card]):
     counts = {}
     for v in values:
         counts[v] = counts.get(v, 0) + 1
-    # Ordina per conteggio discendente, poi per valore discendente
     by_count_then_value = sorted(counts.items(), key=lambda kv: (-kv[1], -kv[0]))
 
     # Straight Flush
@@ -159,7 +147,7 @@ def best_from_seven(seven):
             best = score
     return best
 
-# --- Classe di Gioco ---
+# --- Classe Game ---
 class Game:
     def __init__(self, max_players=4, sb=10, bb=20):
         self.players: List[Player] = []
@@ -173,9 +161,9 @@ class Game:
         self.current_bet = 0
         self.turn_idx = 0
         self.started = False
-        self.stage = "waiting"  # waiting, preflop, flop, turn, river, showdown
-        self.last_raiser_idx = -1  # Traccia l'ultima persona che ha rilanciato/puntato
-        self.last_raise_amount = bb  # Ultimo incremento (min raise)
+        self.stage = "waiting"
+        self.last_raiser_idx = -1
+        self.last_raise_amount = bb
 
     def add_player(self, name) -> str:
         if len(self.players) >= self.max_players:
@@ -190,12 +178,8 @@ class Game:
                 return p
         return None
 
-    # --- Helper per flush delle puntate nel pot ---
+    # --- Gestione pot e betting ---
     def flush_current_bets_to_pot(self):
-        """
-        Sposta tutte le current_bet (dei giocatori) nel pot e azzera current_bet.
-        Deve essere chiamato *solo* al termine di un betting round o quando si conclude la mano.
-        """
         bets = sum(p.current_bet for p in self.players)
         if bets > 0:
             self.pot += bets
@@ -206,17 +190,13 @@ class Game:
         if len(self.players) < 2:
             return False, "Serve almeno 2 giocatori"
 
-        # Filtra i giocatori senza fiches (per poter giocare)
         active_players = [p for p in self.players if p.chips > 0]
         if len(active_players) < 2:
             return False, "Non ci sono abbastanza giocatori con fiches."
 
-        # Non sovrascrivere l'array se è già corretto: manteniamo ordine e riferimenti
         self.players = active_players
-
-        # reset players
         for p in self.players:
-            p._hole = []
+            p.hole = []
             p.in_hand = True
             p.current_bet = 0
             p.all_in = False
@@ -230,14 +210,13 @@ class Game:
         self.last_raiser_idx = -1
         self.last_raise_amount = self.bb
 
-        # deal 2 cards per giocatore (Texas Hold'em)
+        # Distribuzione carte
         for _ in range(2):
             for p in self.players:
-                drawn = self.deck.draw(1)[0]
-                p._hole.append(drawn)
+                p.hole.append(self.deck.draw(1)[0])
 
-        # post blinds
-        self.dealer_idx = self.dealer_idx % len(self.players)  # Assicura che l'indice sia valido
+        # Blinds
+        self.dealer_idx = self.dealer_idx % len(self.players)
         sb_idx = (self.dealer_idx + 1) % len(self.players)
         bb_idx = (self.dealer_idx + 2) % len(self.players)
 
@@ -253,74 +232,15 @@ class Game:
         bb_player.chips -= bb_amt; bb_player.current_bet = bb_amt
         bb_player.all_in = bb_player.chips == 0
 
-        # Metti blind nel pot direttamente (sono puntate iniziali)
         self.pot += sb_amt + bb_amt
         self.current_bet = bb_amt
-
-        # first to act is player after BB
         self.turn_idx = (bb_idx + 1) % len(self.players)
-        self.last_raiser_idx = bb_idx  # La BB è l'ultima "puntata" obbligatoria
+        self.last_raiser_idx = bb_idx
 
         return True, "Mano iniziata"
 
-    def advance_stage(self):
-        """
-        Avanza la fase: prima flusha le puntate nel pot, poi distribuisce le community cards.
-        Gestisce anche il caso in cui tutti siano all-in (auto-showdown).
-        """
-        # Porta le puntate correnti nel pot (fine betting round)
-        self.flush_current_bets_to_pot()
-
-        if self.stage == "preflop":
-            # Flop
-            self.community.extend(self.deck.draw(3))
-            self.stage = "flop"
-        elif self.stage == "flop":
-            # Turn
-            self.community.extend(self.deck.draw(1))
-            self.stage = "turn"
-        elif self.stage == "turn":
-            # River
-            self.community.extend(self.deck.draw(1))
-            self.stage = "river"
-        elif self.stage == "river":
-            self.stage = "showdown"
-        else:
-            # Dopo lo showdown, prepara il gioco per la prossima mano
-            self.started = False
-            self.stage = "waiting"
-            # Muove il dealer alla mano successiva
-            self.dealer_idx = (self.dealer_idx + 1) % len(self.players) if self.players else 0
-            return
-
-        # reset current bets for next round (already done by flush_current_bets_to_pot)
-        self.current_bet = 0
-        self.last_raiser_idx = -1
-        self.last_raise_amount = self.bb
-
-        # next to act is player after dealer (first non-folded/non-all-in player)
-        start = self.dealer_idx
-        nxt = self.next_active_idx(start)
-        if nxt is None:
-            # Se non c'è nessuno che deve agire (es. tutti all-in), avanzare automaticamente fino a showdown
-            while self.stage != "showdown":
-                if self.stage == "preflop":
-                    self.community.extend(self.deck.draw(3))
-                    self.stage = "flop"
-                elif self.stage == "flop":
-                    self.community.extend(self.deck.draw(1))
-                    self.stage = "turn"
-                elif self.stage == "turn":
-                    self.community.extend(self.deck.draw(1))
-                    self.stage = "river"
-                elif self.stage == "river":
-                    self.stage = "showdown"
-            return
-        else:
-            self.turn_idx = nxt
-
+    # --- Stato pubblico ---
     def public_state(self, player_id) -> Dict:
-        # returns JSON-serializable state; reveals only player's own hole cards
         players_public = []
         for p in self.players:
             reveal = (p.id == player_id) or self.stage == "showdown"
@@ -336,107 +256,7 @@ class Game:
             "hand_started": self.started
         }
 
-    def next_active_idx(self, start):
-        """
-        Cerca il prossimo giocatore che deve agire.
-        Restituisce None se nessuno deve agire (giro finito).
-        Questa versione evita il loop infinito quando tutti fanno check.
-        """
-        n = len(self.players)
-        # Cerca giocatore che deve ancora eguagliare la puntata
-        for i in range(1, n + 1):
-            idx = (start + i) % n
-            p = self.players[idx]
-            if p.in_hand and not p.all_in and p.current_bet < self.current_bet:
-                return idx
-
-        # Se current_bet == 0 (tutti possono check), non restituire un giocatore:
-        # significa che il giro può considerarsi finito (tutti hanno la stessa puntata)
-        if self.current_bet == 0:
-            return None
-
-        # Nessuno deve agire
-        return None
-
-    def is_betting_round_over(self):
-        # Un giro di puntate è finito se:
-        # 1. Tutti i giocatori in mano (anche all-in) sono pari alla puntata massima
-        # 2. Ci sono almeno due giocatori in mano
-        if self.all_but_one_folded():
-            return True
-
-        for p in self.players:
-            if p.in_hand and not p.all_in and p.current_bet < self.current_bet:
-                return False
-
-        # Se si è qui, tutti sono o pari o all-in. Il giro è finito.
-        return True
-
-    def all_but_one_folded(self):
-        inplay = [p for p in self.players if p.in_hand]
-        return len(inplay) <= 1
-
-    # Nota: Questa funzione assegna solo il piatto principale (senza side pots).
-    # Assicura che il pot contenga tutte le puntate rilevanti (flush current bets prima).
-    def collect_pots_and_award(self):
-        """
-        Assegna il pot principale ai vincitori. Non gestisce side-pots complessi.
-        Assumiamo che tutte le puntate siano già state flushate nel pot quando necessario.
-        """
-        inplay = [p for p in self.players if p.in_hand]
-        results = []
-
-        # 1. Un solo giocatore rimasto
-        if len(inplay) == 1:
-            winner = inplay[0]
-            winner.chips += self.pot
-            results.append({"winner_name": winner.name, "amount": self.pot, "hand": "Unico Rimasto"})
-            self.pot = 0
-            # fine mano
-            self.started = False
-            self.stage = "waiting"
-            self.dealer_idx = (self.dealer_idx + 1) % len(self.players) if self.players else 0
-            return results
-
-        # 2. Showdown: Assegnazione Semplificata (senza side pots)
-        best_score = None
-        winners = []
-
-        for p in inplay:
-            seven = p._hole + self.community  # uso _hole interno
-            score = best_from_seven(seven)
-
-            hand_type = HAND_RANKS[score[0]]
-
-            if best_score is None or score > best_score:
-                best_score = score
-                winners = [(p, hand_type)]
-            elif score == best_score:
-                winners.append((p, hand_type))
-
-        # Split pot
-        if len(winners) == 0:
-            # Nessun vincitore (improbabile) -> rimetti le puntate a tutti (fallback)
-            self.pot = 0
-            return []
-
-        split = self.pot // len(winners)
-        remaining = self.pot % len(winners)  # Gestione arrotondamento
-
-        for i, (w, hand_type) in enumerate(winners):
-            amount = split
-            if i == 0:
-                amount += remaining
-            w.chips += amount
-            results.append({"winner_name": w.name, "amount": amount, "hand": hand_type})
-
-        self.pot = 0
-        # fine mano
-        self.started = False
-        self.stage = "waiting"
-        self.dealer_idx = (self.dealer_idx + 1) % len(self.players) if self.players else 0
-        return results
-
+    # --- Azioni giocatore ---
     def player_action(self, player_id, action, amount=0) -> Tuple[bool, str]:
         p = self.find_player(player_id)
         if not p: return False, "Player non trovato"
@@ -448,258 +268,97 @@ class Game:
         action = action.lower()
         to_call = self.current_bet - p.current_bet
 
-        # --- Fold ---
         if action == "fold":
             p.in_hand = False
-            # Se rimane un solo giocatore, raccogli il piatto e termina la mano
-            if self.all_but_one_folded():
-                # Porta le puntate correnti nel pot, assegna e termina
+            if len([pl for pl in self.players if pl.in_hand]) == 1:
                 self.flush_current_bets_to_pot()
-                results = self.collect_pots_and_award()
-                return True, f"Hai foldato. Mano terminata. Risultati: {results}"
-
-            # Avanza il turno
-            nxt = self.next_active_idx(self.turn_idx)
-            if nxt is None:
-                # Se foldando il giro è finito (tutti gli altri hanno chiamato/sono all-in)
-                self.advance_stage()
+                self.collect_pots_and_award()
             else:
-                self.turn_idx = nxt
+                self.turn_idx = (self.turn_idx + 1) % len(self.players)
             return True, "Fold"
 
-        # --- Check ---
         if action == "check":
             if to_call > 0:
                 return False, "Non puoi checkare se c'è da chiamare"
-
-            # Avanza il turno: cerca prossimo che deve agire; se nessuno, chiudi il giro
-            nxt = self.next_active_idx(self.turn_idx)
-            if nxt is None:
+            self.turn_idx = (self.turn_idx + 1) % len(self.players)
+            if self.is_betting_round_over():
                 self.advance_stage()
-            else:
-                self.turn_idx = nxt
             return True, "Check"
 
-        # --- Call ---
         if action == "call":
             if to_call <= 0:
-                return False, "Non c'è nulla da chiamare, usa 'check'."
-
+                return False, "Non c'è nulla da chiamare"
             put = min(to_call, p.chips)
-
             p.chips -= put
             p.current_bet += put
-
-            if p.chips == 0:
-                p.all_in = True
-
-            # Avanza il turno
-            nxt = self.next_active_idx(self.turn_idx)
-            if nxt is None:
+            if p.chips == 0: p.all_in = True
+            self.turn_idx = (self.turn_idx + 1) % len(self.players)
+            if self.is_betting_round_over():
                 self.advance_stage()
-            else:
-                self.turn_idx = nxt
             return True, f"Call {put}"
 
-        # --- Raise / Bet ---
         if action == "raise":
-            if amount <= 0:
-                return False, "Specifica un importo di rilancio valido."
-
-            to_call = self.current_bet - p.current_bet
-            # amount è l'incremento desiderato (non il totale)
-            min_inc = self.last_raise_amount if self.last_raiser_idx != -1 else self.bb
-            if amount < min_inc and (to_call + amount) < p.chips:
-                return False, f"L'incremento del rilancio deve essere di almeno {min_inc}."
-
-            to_put = to_call + amount
-
-            # All-in
-            if to_put >= p.chips:
-                to_put = p.chips
+            if amount <= 0: return False, "Importo raise non valido"
+            total_bet = to_call + amount
+            if total_bet >= p.chips:
+                total_bet = p.chips
                 p.all_in = True
-
-            p.chips -= to_put
-            p.current_bet += to_put
-
-            # Aggiorna la puntata corrente del tavolo solo se è maggiore
+            p.chips -= total_bet
+            p.current_bet += total_bet
             if p.current_bet > self.current_bet:
-                actual_inc = p.current_bet - self.current_bet
+                self.last_raise_amount = p.current_bet - self.current_bet
                 self.current_bet = p.current_bet
-                self.last_raiser_idx = self.turn_idx
-                self.last_raise_amount = actual_inc
-
-            # Avanza il turno
-            nxt = self.next_active_idx(self.turn_idx)
-            if nxt is None:
+            self.turn_idx = (self.turn_idx + 1) % len(self.players)
+            if self.is_betting_round_over():
                 self.advance_stage()
-            else:
-                self.turn_idx = nxt
-
-            return True, f"Raised a {p.current_bet} (Messo: {to_put})"
+            return True, f"Raise {amount}"
 
         return False, "Azione non riconosciuta"
 
-    # --- AGGIUNTA: Visualizzazione dello stato del tavolo ---
-    def print_table(self, reveal_all=False, player_id=None):
-        print("=" * 60)
-        print(f"💰 POT TOTALE: {self.pot} | 🎲 FASE: {self.stage.upper()} | 📞 PUNTATA DA CHIAMARE: {self.current_bet}")
+    def is_betting_round_over(self):
+        active = [p for p in self.players if p.in_hand and not p.all_in]
+        if not active: return True
+        return all(p.current_bet == self.current_bet for p in active)
 
-        community_str = " ".join([repr(c) for c in self.community]) if self.community else "[Nessuna Carta]"
-        print(f"🃏 CARTE COMUNITARIE: {community_str}")
-        print("-" * 60)
+    def advance_stage(self):
+        self.flush_current_bets_to_pot()
+        if self.stage == "preflop": self.community.extend(self.deck.draw(3)); self.stage = "flop"
+        elif self.stage == "flop": self.community.extend(self.deck.draw(1)); self.stage = "turn"
+        elif self.stage == "turn": self.community.extend(self.deck.draw(1)); self.stage = "river"
+        elif self.stage == "river": self.stage = "showdown"
+        else: self.stage = "waiting"; self.started = False; return
+        self.current_bet = 0
+        self.last_raiser_idx = -1
+        self.last_raise_amount = self.bb
+        self.turn_idx = (self.dealer_idx + 1) % len(self.players)
 
-        print("GIOCATORI:")
-        for idx, p in enumerate(self.players):
+    def collect_pots_and_award(self):
+        inplay = [p for p in self.players if p.in_hand]
+        if len(inplay) == 1:
+            winner = inplay[0]
+            winner.chips += self.pot
+            self.pot = 0
+            self.started = False
+            self.stage = "waiting"
+            return [{"winner_name": winner.name, "amount": winner.chips, "hand": "Unico Rimasto"}]
 
-            is_dealer = "D" if idx == self.dealer_idx else " "
-            is_sb = "SB" if idx == (self.dealer_idx + 1) % len(self.players) else " "
-            is_bb = "BB" if idx == (self.dealer_idx + 2) % len(self.players) else " "
-
-            pos = f"[{is_dealer}{is_sb}{is_bb}]"
-
-            # Mostra le carte solo al proprio giocatore (o tutte in showdown) o reveal_all esplicito
-            reveal = reveal_all or (player_id is not None and p.id == player_id) or (self.stage == "showdown")
-            hole_cards = " ".join(p.hole_public(reveal=reveal))
-
-            marker = "<- TURNO" if self.started and idx == self.turn_idx else ""
-            status = ""
-            if p.all_in: status = "ALL-IN"
-            elif not p.in_hand: status = "FOLD"
-
-            # Calcola quanto manca per chiamare
-            to_call = self.current_bet - p.current_bet
-            call_status = f"(Mancano: {max(0, to_call)} per chiamare)"
-
-            print(f"{pos} {p.name} ({p.chips} chips) | Carte: {hole_cards} | Puntato: {p.current_bet} {call_status} {status} {marker}")
-        print("=" * 60)
-
-# --- Funzione Principale per l'Interazione ---
-def main():
-    game = Game(max_players=6, sb=10, bb=20)
-
-    # Setup Giocatori (Input semplice)
-    print("--- ♠️ Texas Hold'em (Console) ♣️ ---")
-    num_players = 0
-    while num_players < 2 or num_players > game.max_players:
-        try:
-            num_players = int(input(f"Quanti giocatori (2-{game.max_players})? "))
-        except ValueError:
-            continue
-
-    player_names = []
-    for i in range(num_players):
-        name = input(f"Inserisci il nome del Giocatore {i+1}: ")
-        player_names.append(name)
-
-    for name in player_names:
-        game.add_player(name)
-
-    # Ciclo di gioco principale
-    hand_num = 1
-    while len([p for p in game.players if p.chips > 0]) >= 2:
-        print(f"\n======== MANO {hand_num} ========")
-
-        # Riordina i giocatori eliminando i bankrupt e spostando il dealer
-        game.players = [p for p in game.players if p.chips > 0]
-        if len(game.players) < 2:
-            print("\nNon ci sono abbastanza giocatori con fiches per continuare.")
-            break
-
-        success, msg = game.start_hand()
-        if not success:
-            print(f"Errore: {msg}. Fine partita.")
-            break
-
-        # Ciclo di puntate (fino a showdown o fold)
-        while game.started and game.stage != "showdown" and not game.all_but_one_folded():
-            print(f"\n--- Fase: {game.stage.upper()} ---")
-
-            # Trova l'ID del giocatore di turno per mostrare solo le sue carte
-            if not game.started: break
-            turn_player_id = game.players[game.turn_idx].id
-            game.print_table(player_id=turn_player_id)
-
-            current_player = game.players[game.turn_idx]
-
-            # Se il giocatore è foldato o all-in (e non è l'unico rimasto), avanza il turno
-            if not current_player.in_hand or current_player.all_in:
-                nxt = game.next_active_idx(game.turn_idx)
-                if nxt is None:
-                    game.advance_stage()
-                else:
-                    game.turn_idx = nxt
-                continue
-
-            to_call = game.current_bet - current_player.current_bet
-
-            print(f"\n➡️ TURNO DI {current_player.name}")
-            print(f"Fiches: {current_player.chips} | Puntato nel round: {current_player.current_bet}")
-
-            # Prompt azione
-            valid_action = False
-            while not valid_action:
-                if to_call == 0:
-                    action_prompt = f"Azione (check / bet <importo> / fold): "
-                else:
-                    action_prompt = f"Azione (call {to_call} / raise <incremento> / fold): "
-
-                action_input = input(action_prompt).strip().split()
-                if not action_input:
-                    continue
-
-                action = action_input[0].lower()
-                amount = 0
-
-                if len(action_input) > 1 and (action == "raise" or action == "bet"):
-                    try:
-                        amount = int(action_input[1])
-                    except ValueError:
-                        print("Importo non valido. Riprova.")
-                        continue
-
-                # Normalizza 'bet' a 'raise' con to_call=0
-                if action == "bet":
-                    if to_call > 0:
-                        print("Devi usare 'call' o 'raise', non 'bet'.")
-                        continue
-                    action = "raise"
-
-                # Esecuzione e gestione degli errori
-                if action in ["fold", "check", "call", "raise"]:
-                    success, msg = game.player_action(current_player.id, action, amount)
-                    print(f"-> {msg}")
-                    valid_action = success
-                else:
-                    print("Azione non riconosciuta (usa fold, check, call o raise/bet <importo>).")
-
-            # Dopo l'azione, se il betting round è terminato, avanza la fase
-            if game.is_betting_round_over() and game.started:
-                game.advance_stage()
-
-        # Assegnazione del piatto
-        if not game.started or game.stage == "showdown":
-            if game.started and game.stage == "showdown":
-                # Assicuriamoci di mettere eventuali puntate residue nel pot
-                game.flush_current_bets_to_pot()
-                print("\n--- SHOWDOWN ---")
-            else:
-                # Se la mano è finita per fold, le puntate sono state flushate/gestite già
-                print("\n--- Mano Terminata per Fold ---")
-
-            game.print_table(reveal_all=True)
-            winners = game.collect_pots_and_award()
-            print("\n🏆 VINCITORI E ASSEGNAZIONE PIATTO:")
-            for result in winners:
-                print(f"- **{result['winner_name']}** vince **{result['amount']}** fiches con un **{result['hand']}**.")
-
-            hand_num += 1
-
-    print("\n\n--- PARTITA TERMINATA ---")
-    final_players = sorted([p for p in game.players if p.chips > 0], key=lambda p: p.chips, reverse=True)
-    for p in final_players:
-        print(f"Classifica: {p.name} con {p.chips} fiches.")
-
-
-if __name__ == "__main__":
-    main()
+        best_score = None
+        winners = []
+        for p in inplay:
+            score = best_from_seven(p.hole + self.community)
+            if best_score is None or score > best_score:
+                best_score = score
+                winners = [(p, HAND_RANKS[score[0]])]
+            elif score == best_score:
+                winners.append((p, HAND_RANKS[score[0]]))
+        split = self.pot // len(winners)
+        remaining = self.pot % len(winners)
+        results = []
+        for i, (w, hand_type) in enumerate(winners):
+            amt = split + (remaining if i==0 else 0)
+            w.chips += amt
+            results.append({"winner_name": w.name, "amount": amt, "hand": hand_type})
+        self.pot = 0
+        self.started = False
+        self.stage = "waiting"
+        return results
