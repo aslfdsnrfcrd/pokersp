@@ -90,7 +90,6 @@ def is_straight(values):
 
 def evaluate_5cards(cards: List[Card]):
     """Valuta il punteggio di una mano di 5 carte. Ritorna (rank_idx, kicker_tuple)."""
-    # [Logica di valutazione della mano omessa per brevità ma presente]
     values = sorted((c.value for c in cards), reverse=True)
     counts = {}
     for v in values: counts[v] = counts.get(v,0)+1
@@ -172,7 +171,7 @@ class Game:
         self.last_raiser_idx=-1
         self.last_raise_amount=bb
         self.initial_bet_round_starter_idx = -1 
-        self.is_hand_resolved = False # Nuovo stato per indicare che la mano è finita ma lo showdown è da mostrare
+        self.is_hand_resolved = False 
 
     def add_player(self,name)->str:
         """Aggiunge un nuovo giocatore al tavolo."""
@@ -189,6 +188,7 @@ class Game:
 
     def reset_for_new_hand(self):
         """Resetta lo stato del gioco per una nuova mano."""
+        # Lo stato 'resolved' viene pulito qui per consentire una nuova mano.
         self.deck = None
         self.community = []
         self.pot = 0
@@ -199,8 +199,7 @@ class Game:
         self.last_raiser_idx = -1
         self.last_raise_amount = self.bb
         self.initial_bet_round_starter_idx = -1
-        self.dealer_idx = (self.dealer_idx + 1) % len(self.players) # Avanza il dealer
-        self.is_hand_resolved = False # Pronto per una nuova mano
+        self.is_hand_resolved = False 
 
     # --- Gestione pot e betting ---
     def flush_current_bets_to_pot(self):
@@ -212,8 +211,8 @@ class Game:
 
     def start_hand(self)->Tuple[bool,str]:
         """Inizia una nuova mano: mischia, distribuisci e piazza i blinds."""
+        # Se la mano precedente è risolta, esegue il reset.
         if self.is_hand_resolved:
-            # Pulisce lo stato precedente
             self.reset_for_new_hand()
             
         if len(self.players)<2: return False,"Serve almeno 2 giocatori"
@@ -228,6 +227,10 @@ class Game:
             p.current_bet=0
             p.all_in=False
             p.total_contribution = 0 
+            
+        # Avanza il dealer (sulla nuova lista di giocatori attivi)
+        if self.started:
+            self.dealer_idx = (self.dealer_idx + 1) % len(self.players)
             
         self.deck=Deck()
         self.community=[]
@@ -244,7 +247,6 @@ class Game:
                 if self.deck.cards: p.hole.append(self.deck.draw(1)[0])
         
         # Blinds
-        self.dealer_idx=self.dealer_idx%len(self.players)
         sb_idx=(self.dealer_idx+1)%len(self.players)
         bb_idx=(self.dealer_idx+2)%len(self.players)
         
@@ -277,8 +279,17 @@ class Game:
             reveal=(p.id==player_id) or self.stage=="showdown"
             players_public.append(p.to_public(reveal=reveal))
             
-        turn_player = self.players[self.turn_idx] if self.players and self.started and self.stage!="showdown" and self.turn_idx!=-1 else None
-        
+        turn_id = None
+        turn_name = None
+
+        # FIX: Controlliamo esplicitamente l'indice e lo stato
+        if (self.players and self.started and self.stage!="showdown" and 
+            self.turn_idx!=-1 and 0 <= self.turn_idx < len(self.players)):
+            
+            turn_player = self.players[self.turn_idx]
+            turn_id = turn_player.id
+            turn_name = turn_player.name
+            
         return {
             "players":players_public,
             "community":[c.to_dict() for c in self.community],
@@ -286,9 +297,9 @@ class Game:
             "stage":self.stage,
             "dealer_idx":self.dealer_idx,
             "current_bet":self.current_bet,
-            # FIX: Aggiunto nome del turno per la visualizzazione.
-            "turn_id":turn_player.id if turn_player else None,
-            "turn_name":turn_player.name if turn_player else None,
+            # Campo da usare nel client per il nome
+            "turn_id":turn_id,
+            "turn_name":turn_name, 
             "hand_started":self.started,
             "required_call": self.current_bet - (self.find_player(player_id).current_bet if self.find_player(player_id) else 0)
         }
@@ -298,11 +309,11 @@ class Game:
         n = len(self.players)
         for i in range(1, n + 1):
             idx = (current_idx + i) % n
-            # Deve essere in mano E non All-in se non c'è una puntata da chiamare (situazione check)
             p = self.players[idx]
+            # Deve essere in mano E non All-in se ha ancora da agire
             if p.in_hand and not (p.all_in and p.current_bet == self.current_bet):
                 return idx
-        return -1 # Non dovrebbe succedere se la mano è iniziata e non è finita
+        return -1 
 
     # --- Logica Turno e Avanzamento ---
 
@@ -318,32 +329,27 @@ class Game:
             
         active_in_hand = [p for p in self.players if p.in_hand]
         
-        # 1. Controlla se tutti gli attivi hanno matchato la puntata.
-        # Esclude i giocatori All-in se hanno matchato la current_bet
+        # Giocatori che DEVONO agire (non foldati e non All-in che hanno già matchato)
         must_act = [p for p in active_in_hand if not (p.all_in and p.current_bet == self.current_bet)]
         
         if not must_act:
-            # Tutti gli attivi sono All-in e hanno matchato la puntata. Round finito.
+            # Tutti gli attivi sono All-in o hanno matchato All-in. Round finito.
             return True
         
         all_active_matched_bet = all(p.current_bet == self.current_bet for p in must_act)
         
-        if not all_active_matched_bet: return False # Qualcuno deve ancora chiamare
+        if not all_active_matched_bet: return False 
         
-        # 2. Requisito di Ciclo Completo (solo se tutti hanno matchato)
-        
+        # Requisito di Ciclo Completo
         if self.current_bet == 0 and self.stage != "preflop":
-            # Caso di check post-flop: il round è chiuso solo se il ciclo è completo.
-            next_player_idx = self.get_next_player_in_hand_idx(self.turn_idx)
-            
-            # Se il prossimo ad agire è l'iniziatore, il ciclo è completo
-            if next_player_idx == self.initial_bet_round_starter_idx:
+            next_idx = self.get_next_player_in_hand_idx(self.turn_idx)
+            # Se il prossimo è l'iniziatore (il ciclo è completo)
+            if next_idx == self.initial_bet_round_starter_idx:
                 return True
             else:
                 return False
                 
-        # Se current_bet > 0, o se è preflop (dove il BB è considerato una puntata),
-        # e tutti hanno matchato, il round è finito.
+        # Se c'è stata una puntata (current_bet > 0) e tutti hanno matchato, il round è finito.
         return True
         
     def get_first_to_act_post_flop(self):
@@ -354,7 +360,7 @@ class Game:
         for i in range(n):
             idx = (start_pos + i) % n
             p = self.players[idx]
-            # Il primo a parlare è il primo in mano e non all-in
+            # Primo a parlare: in mano e non all-in
             if p.in_hand and not p.all_in:
                 return idx
         return -1 
@@ -380,14 +386,14 @@ class Game:
         if self.stage=="showdown":
             # La mano è finita, assegna i piatti e imposta il flag risolto
             results = self.collect_pots_and_award()
-            self.is_hand_resolved = True # Fissa lo stato per visualizzare lo showdown
+            self.is_hand_resolved = True 
             return True, f"Showdown! Risultati: {results}"
 
         # Determina il primo giocatore ad agire post-flop
         first_to_act_idx = self.get_first_to_act_post_flop()
         
         if first_to_act_idx == -1:
-             # Nessuno attivo non all-in, si avanza forzatamente fino allo showdown
+             # Nessuno attivo non all-in, avanza forzatamente le carte e imposta showdown
              while len(self.community) < 5:
                  if self.deck: self.community.extend(self.deck.draw(1))
              self.stage = "showdown"
@@ -397,7 +403,7 @@ class Game:
 
         self.turn_idx = first_to_act_idx
         self.initial_bet_round_starter_idx = first_to_act_idx
-        return None # Ritorna None se l'avanzamento di fase è avvenuto con successo
+        return None 
 
     # --- Azioni giocatore ---
     def check_and_advance_stage_if_round_over(self, action_description):
@@ -408,7 +414,7 @@ class Game:
             self.stage = "showdown" 
             self.flush_current_bets_to_pot()
             results=self.collect_pots_and_award()
-            self.is_hand_resolved = True # Fissa lo stato per visualizzare lo showdown
+            self.is_hand_resolved = True 
             return True,f"{action_description}. Mano terminata per fold. Risultati:{results}"
 
         # 2. Caso Round Terminati (tutti chiamati/checkati)
@@ -421,14 +427,13 @@ class Game:
                 return True, action_description + f". Avanzamento a {self.stage}"
         
         # 3. Caso Round Continua
-        # Passa il turno al prossimo in mano (non foldato) in modo circolare.
         next_idx = self.get_next_player_in_hand_idx(self.turn_idx)
         
         if next_idx != -1:
             self.turn_idx = next_idx
             return True, action_description
         else:
-            # Fallback per la fine del round se l'indice non avanza
+            # Fallback: se is_betting_round_over non l'ha catturato, forziamo l'avanzamento.
             return self.advance_stage() or (True, action_description + ". Avanzamento di fase forzato.")
 
     def player_action(self,player_id,action,amount=0)->Tuple[bool,str]:
