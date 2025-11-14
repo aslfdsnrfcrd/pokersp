@@ -263,42 +263,17 @@ class Game:
             "hand_started":self.started,
             "required_call": self.current_bet - (self.find_player(player_id).current_bet if self.find_player(player_id) else 0)
         }
+        
+    def get_next_player_in_hand_idx(self, current_idx: int) -> int:
+        """Trova l'indice del prossimo giocatore (in senso orario) che è ancora in mano."""
+        n = len(self.players)
+        for i in range(1, n + 1):
+            idx = (current_idx + i) % n
+            if self.players[idx].in_hand:
+                return idx
+        return -1 # Non dovrebbe succedere se la mano è iniziata e non è finita
 
     # --- Logica Turno e Avanzamento (FIXED) ---
-
-    def find_next_player_to_act(self, start_idx: int) -> Optional[int]:
-        """Trova il prossimo giocatore attivo che DEVE ancora agire per chiudere il round."""
-        n = len(self.players)
-        
-        # Se tutti tranne uno hanno foldato, il round è chiuso.
-        if self.all_but_one_folded():
-            return None 
-
-        # Itera N volte partendo dal giocatore DOPO lo start_idx (circolarmente)
-        for i in range(1, n + 1):
-            idx = (start_idx + i) % n
-            p = self.players[idx]
-            
-            # Condizioni per dover agire:
-            if p.in_hand and not p.all_in:
-                # Caso A: Deve chiamare la puntata massima
-                if p.current_bet < self.current_bet:
-                    return idx
-                # Caso B: Se non c'è puntata (current_bet=0) e non ha agito
-                # Questa condizione è gestita implicitamente dal ciclo che parte da
-                # UTG e si chiude al BB preflop o al Dealer postflop
-                
-                # Se il giocatore è il last_raiser, il giro finisce dopo di lui
-                # MA deve essersi trovato un giocatore che abbia fatto un'azione di rilancio
-                if idx == self.last_raiser_idx:
-                    return None # Il giro si è chiuso con l'azione precedente (Call o Fold)
-            
-        # Controlla il caso speciale: se tutti hanno checkato/chiamato al current_bet
-        # e si è tornati all'ultimo raiser/big blind (che ha già agito al current_bet)
-        # Il loop sopra dovrebbe catturare tutti quelli che hanno current_bet < self.current_bet.
-        # Se si arriva qui, significa che tutti gli attivi hanno current_bet == self.current_bet.
-        return None
-
 
     def all_but_one_folded(self):
         """Controlla se tutti i giocatori tranne uno hanno foldato."""
@@ -308,33 +283,40 @@ class Game:
     def is_betting_round_over(self):
         """Controlla se il giro di puntate è terminato."""
         
-        # 1. Se tutti tranne uno hanno foldato, la mano è finita.
-        if self.all_but_one_folded():
-            return True
+        # 1. Mano Terminata
+        if self.all_but_one_folded(): return True
             
-        # 2. Se non c'è nessuno che deve ancora agire, il round è finito.
-        # Chiamiamo find_next_player_to_act partendo dal giocatore che ha appena agito (self.turn_idx)
-        # E cerchiamo il prossimo.
-        
-        # Il giro finisce se:
-        # a) Tutti gli attivi (non foldati, non all-in) hanno puntato lo stesso ammontare (self.current_bet)
-        all_active_matched = all(p.current_bet == self.current_bet for p in self.players if p.in_hand and not p.all_in)
-        
-        # b) Tutti i giocatori sono all-in o hanno foldato, tranne 1 (già catturato da all_but_one_folded)
-        # c) Se non c'è raise, il giro finisce quando si torna al primo che ha agito (preflop BB, postflop SB)
-        
-        # Questo è il modo più pulito: se non trovo nessuno che deve ancora chiamare, il round è chiuso.
-        
-        active_in_hand = [p for p in self.players if p.in_hand]
-        
-        # Se tutti gli attivi sono all-in o hanno matchato il current_bet, è finita.
-        if all(p.all_in or p.current_bet == self.current_bet for p in active_in_hand):
-            return True
+        active_in_hand = [p for p in self.players if p.in_hand and not p.all_in]
+        # Se solo 1 o 0 giocatori non sono All-in, il round è chiuso.
+        if len(active_in_hand) <= 1: return True
 
-        # Se non c'è una puntata e il turno è tornato al primo a parlare post-flop (SB) o pre-flop (BB)
-        if self.current_bet == 0 and self.turn_idx == self.initial_bet_round_starter_idx and len(active_in_hand)>1:
+        # 2. Requisito di Match
+        # Tutti i giocatori attivi (non all-in) devono aver matchato la puntata.
+        all_active_matched_bet = all(p.current_bet == self.current_bet for p in active_in_hand)
+        
+        if not all_active_matched_bet: return False # Qualcuno deve ancora chiamare
+        
+        # A questo punto, tutti i giocatori attivi hanno puntato `self.current_bet`.
+        
+        # 3. Requisito di Ciclo Completo
+        
+        # A. Caso con Puntata (Preflop dopo BB, o Raise Postflop):
+        if self.current_bet > 0:
+            # Se tutti hanno matchato una puntata > 0, il round è finito.
             return True
         
+        # B. Caso senza Puntata (Giro di Check Postflop):
+        if self.current_bet == 0:
+            # Il round è finito SOLO se il prossimo giocatore ad agire è l'iniziatore.
+            # (Il ciclo è completo, tutti hanno checkato).
+            next_player_idx = self.get_next_player_in_hand_idx(self.turn_idx)
+            
+            if next_player_idx == self.initial_bet_round_starter_idx:
+                return True
+            else:
+                # Il round continua (il turno deve passare al giocatore successivo).
+                return False
+                
         return False
         
     def get_first_to_act_post_flop(self):
@@ -345,9 +327,10 @@ class Game:
         for i in range(n):
             idx = (start_pos + i) % n
             p = self.players[idx]
+            # Il primo a parlare è il primo in mano e non all-in dopo il dealer.
             if p.in_hand and not p.all_in:
                 return idx
-        return -1 # Caso in cui non ci sono giocatori attivi (uno solo in mano, tutti all-in)
+        return -1 
 
     def advance_stage(self) -> Optional[Tuple[bool, str]]:
         """Avanza alla fase successiva (Flop, Turn, River, Showdown)."""
@@ -378,15 +361,14 @@ class Game:
         first_to_act_idx = self.get_first_to_act_post_flop()
         
         if first_to_act_idx == -1:
-             # Nessuno attivo, si avanza forzatamente fino allo showdown
+             # Nessuno attivo non all-in, si avanza forzatamente fino allo showdown
              if len(self.community) < 5:
                  while len(self.community) < 5:
-                     self.community.extend(self.deck.draw(1))
+                     if self.deck: self.community.extend(self.deck.draw(1))
                  self.stage = "showdown"
                  results = self.collect_pots_and_award()
                  return True, f"Showdown forzato! Risultati: {results}"
              else:
-                 # Questo non dovrebbe succedere, ma per sicurezza
                  self.stage = "showdown"
                  results = self.collect_pots_and_award()
                  return True, f"Showdown! Risultati: {results}"
@@ -415,20 +397,15 @@ class Game:
                 return True, action_description + f". Avanzamento a {self.stage}"
         
         # 3. Caso Round Continua
-        # Passa il turno al prossimo in modo circolare, indipendentemente dal DEVE agire o meno
-        # Sarà il prossimo giocatore a verificare se deve agire.
-        n = len(self.players)
+        # Passa il turno al prossimo in mano (non foldato) in modo circolare.
+        next_idx = self.get_next_player_in_hand_idx(self.turn_idx)
         
-        # Trova il prossimo indice attivo (non foldato) in modo circolare.
-        for i in range(1, n + 1):
-            idx = (self.turn_idx + i) % n
-            p = self.players[idx]
-            if p.in_hand:
-                self.turn_idx = idx
-                return True, action_description
-        
-        # Se si arriva qui, c'è un errore logico o è rimasto solo un giocatore (gestito sopra)
-        return True, action_description
+        if next_idx != -1:
+            self.turn_idx = next_idx
+            return True, action_description
+        else:
+            # Caso di errore, ma gestito in `all_but_one_folded`
+            return False, "Errore logico nel passaggio del turno (nessun prossimo giocatore in mano trovato)."
 
     def player_action(self,player_id,action,amount=0)->Tuple[bool,str]:
         p=self.find_player(player_id)
@@ -469,7 +446,8 @@ class Game:
         if action=="raise":
             if amount<=0: return False,"Importo raise non valido"
             
-            min_raise_required = self.last_raise_amount if self.last_raiser_idx!=-1 else self.bb
+            # Il raise minimo è la dimensione dell'ultima puntata/rilancio, o BB
+            min_raise_required = self.last_raise_amount 
             
             # 'amount' è la PUNTATA TOTALE che il giocatore vuole raggiungere
             total_bet_to_be = amount 
@@ -483,17 +461,16 @@ class Game:
             # 1. Verifica la dimensione del raise
             new_raise_amount = total_bet_to_be - self.current_bet
             
+            # Solo se non si è all-in
             if new_raise_amount < min_raise_required and total_put < p.chips:
                  return False, f"Raise troppo piccolo. Il rilancio deve essere almeno {min_raise_required} oltre la puntata corrente."
                  
-            # 2. Gestione All-in
+            # 2. Gestione All-in (sempre permesso, anche se un mini-raise)
             if total_put >= p.chips:
                 total_put = p.chips
                 total_bet_to_be = p.current_bet + total_put
-                # E' un all-in, che è sempre permesso anche se inferiore al minimo raise
-                if total_bet_to_be <= self.current_bet:
-                    # Tecnicamente è un call (o un fold se < call, ma non dovrebbe accadere qui)
-                    return self.player_action(player_id, "call")
+                # Se l'all-in non è nemmeno un Call, non è valido (gestito da to_call)
+                # Un all-in che è meno di un full raise è un "mini-raise" ed è valido.
                 
             # 3. Applicazione della puntata
             old_current_bet = self.current_bet
