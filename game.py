@@ -54,10 +54,18 @@ class Player:
         self.id = str(uuid4())[:8]
         self.name = name
         self.chips = 1000
-        self.hole: List[Card] = []
+        # PRIVATE storage delle hole cards (uso _hole internamente)
+        self._hole: List[Card] = []
         self.in_hand = True
         self.current_bet = 0
         self.all_in = False
+
+    # Metodo per ottenere le carte pubbliche (mascherate o rivelate)
+    def hole_public(self, reveal: bool = False) -> List[str]:
+        if reveal:
+            return [repr(c) for c in self._hole]
+        # maschera in base al numero di carte (2) per compatibilità client
+        return ["XX"] * len(self._hole)
 
     def to_public(self, reveal=False):
         return {
@@ -67,7 +75,7 @@ class Player:
             "in_hand": self.in_hand,
             "current_bet": self.current_bet,
             "all_in": self.all_in,
-            "hole": [repr(c) for c in self.hole] if reveal else (len(self.hole) * ["XX"])
+            "hole": self.hole_public(reveal=reveal)
         }
 
 # --- Funzioni di Valutazione ---
@@ -203,12 +211,12 @@ class Game:
         if len(active_players) < 2:
             return False, "Non ci sono abbastanza giocatori con fiches."
 
-        # Aggiorna la lista dei giocatori solo con quelli attivi per la mano
+        # Non sovrascrivere l'array se è già corretto: manteniamo ordine e riferimenti
         self.players = active_players
 
         # reset players
         for p in self.players:
-            p.hole = []
+            p._hole = []
             p.in_hand = True
             p.current_bet = 0
             p.all_in = False
@@ -222,10 +230,11 @@ class Game:
         self.last_raiser_idx = -1
         self.last_raise_amount = self.bb
 
-        # deal 2 cards
+        # deal 2 cards per giocatore (Texas Hold'em)
         for _ in range(2):
             for p in self.players:
-                p.hole.append(self.deck.draw(1)[0])
+                drawn = self.deck.draw(1)[0]
+                p._hole.append(drawn)
 
         # post blinds
         self.dealer_idx = self.dealer_idx % len(self.players)  # Assicura che l'indice sia valido
@@ -394,7 +403,7 @@ class Game:
         winners = []
 
         for p in inplay:
-            seven = p.hole + self.community
+            seven = p._hole + self.community  # uso _hole interno
             score = best_from_seven(seven)
 
             hand_type = HAND_RANKS[score[0]]
@@ -549,13 +558,9 @@ class Game:
 
             pos = f"[{is_dealer}{is_sb}{is_bb}]"
 
-            # Mostra le carte solo al proprio giocatore (o tutte in showdown)
-            if reveal_all or self.stage == "showdown":
-                hole_cards = " ".join([repr(c) for c in p.hole])
-            elif player_id is not None and p.id == player_id:
-                hole_cards = " ".join([repr(c) for c in p.hole])
-            else:
-                hole_cards = "XX XX"
+            # Mostra le carte solo al proprio giocatore (o tutte in showdown) o reveal_all esplicito
+            reveal = reveal_all or (player_id is not None and p.id == player_id) or (self.stage == "showdown")
+            hole_cards = " ".join(p.hole_public(reveal=reveal))
 
             marker = "<- TURNO" if self.started and idx == self.turn_idx else ""
             status = ""
@@ -698,4 +703,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-__all__ = ["Game"]
