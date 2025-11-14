@@ -247,6 +247,7 @@ class Game:
         """Ritorna lo stato del gioco per un giocatore specifico."""
         players_public=[]
         for p in self.players:
+            # Le carte sono rivelate al giocatore attuale O se la fase è "showdown"
             reveal=(p.id==player_id) or self.stage=="showdown"
             players_public.append(p.to_public(reveal=reveal))
             
@@ -259,7 +260,9 @@ class Game:
             "stage":self.stage,
             "dealer_idx":self.dealer_idx,
             "current_bet":self.current_bet,
+            # AGGIUNTA: Turno del giocatore per ID e NOME per la visualizzazione.
             "turn_id":turn_player.id if turn_player else None,
+            "turn_name":turn_player.name if turn_player else None,
             "hand_started":self.started,
             "required_call": self.current_bet - (self.find_player(player_id).current_bet if self.find_player(player_id) else 0)
         }
@@ -342,11 +345,8 @@ class Game:
             if self.deck: self.community.extend(self.deck.draw(1)); self.stage="turn"
         elif self.stage=="turn":
             if self.deck: self.community.extend(self.deck.draw(1)); self.stage="river"
-        elif self.stage=="river":
-            self.stage="showdown"
-        else: 
-            self.stage="waiting"; self.started=False; return None 
-
+        # Rimosso il 'else: self.stage="waiting"' per permettere allo showdown di persistere
+        
         # Reset delle puntate per il nuovo round
         self.current_bet=0
         self.last_raiser_idx=-1
@@ -355,6 +355,7 @@ class Game:
         if self.stage=="showdown":
             # La mano è finita, assegna i piatti
             results = self.collect_pots_and_award()
+            # Non resettiamo stage/started qui per permettere al client di visualizzare lo showdown
             return True, f"Showdown! Risultati: {results}"
 
         # Determina il primo giocatore ad agire post-flop (SB se attivo, altrimenti il primo dopo D)
@@ -383,6 +384,7 @@ class Game:
         
         # 1. Caso Mano Terminata (Solo 1 in mano)
         if self.all_but_one_folded():
+            self.stage = "showdown" # FIX: Imposta a showdown per visualizzare la vittoria.
             self.flush_current_bets_to_pot()
             results=self.collect_pots_and_award()
             return True,f"{action_description}. Mano terminata. Risultati:{results}"
@@ -412,6 +414,7 @@ class Game:
         if not p: return False,"Player non trovato"
         if not p.in_hand: return False,"Hai già foldato"
         if not self.started: return False,"Mano non iniziata"
+        if self.stage=="showdown": return False,"La mano è finita, avviare la prossima"
         if self.players[self.turn_idx].id!=player_id: return False,"Non è il tuo turno"
         if p.all_in: return False,"Sei All-in, non puoi agire"
         
@@ -497,8 +500,7 @@ class Game:
         all_results = []
         
         if not inplay_with_contribution:
-            self.started = False
-            self.stage = "waiting"
+            # FIX: Rimosso reset dello stato per consentire la visualizzazione dello showdown.
             return [{"winner_name": "Nessuno", "amount": 0, "hand": "No Contributi"}]
 
         # Se è rimasto un solo giocatore non foldato (anche se è andato all-in), prende tutto
@@ -508,8 +510,7 @@ class Game:
             amt = sum(p.total_contribution for p in self.players)
             winner.chips += amt
             self.pot = 0
-            self.started = False
-            self.stage = "waiting"
+            # FIX: Rimosso reset dello stato per consentire la visualizzazione dello showdown.
             return [{"winner_name": winner.name, "amount": amt, "hand": "Unico Rimasto"}]
 
 
@@ -581,7 +582,6 @@ class Game:
                     })
                             
         self.pot = 0
-        self.started = False
-        self.stage = "waiting"
+        # FIX: Rimosso reset dello stato per consentire la visualizzazione dello showdown.
         
         return all_results
