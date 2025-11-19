@@ -71,7 +71,7 @@ function renderState(s) {
     let check = document.createElement("button");
     check.innerText = "Check"; check.onclick = ()=>doAction("check");
     let call = document.createElement("button");
-    call.innerText = "Call"; call.onclick = ()=>doAction("call");
+    call.Text = "Call"; call.onclick = ()=>doAction("call");
     let raise = document.createElement("button");
     raise.innerText = "Raise"; raise.onclick = ()=> {
       let amt = prompt("Quanto vuoi rilanciare (numero)?");
@@ -79,9 +79,11 @@ function renderState(s) {
       doAction("raise", parseInt(amt,10));
     };
     controlsDiv.appendChild(fold); controlsDiv.appendChild(check); controlsDiv.appendChild(call); controlsDiv.appendChild(raise);
-  } else {
-    controlsDiv.innerHTML = `Turno di: ${s.turn_id === null ? "nessuno" : s.turn_id}`;
-  }
+} else {
+  let current = s.players.find(p => p.id === s.turn_id);
+  let turnName = current ? current.name : "nessuno";
+  controlsDiv.innerHTML = `Turno di: ${turnName}`;
+}
 }
 
 async function doAction(action, amount=0) {
