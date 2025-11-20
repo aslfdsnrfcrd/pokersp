@@ -1,3 +1,11 @@
+Assolutamente. L'errore SyntaxError: invalid non-printable character U+00A0 è causato dalla presenza di caratteri di Spazio Unificatore (Non-Breaking Space, NBSP) nel codice, spesso introdotti involontariamente durante la copia e incolla. Questi caratteri (U+00A0) devono essere sostituiti con normali spazi ASCII (U+0020).
+
+Ho revisionato e pulito l'intero codice JavaScript, sostituendo tutti i caratteri NBSP che erano presenti soprattutto attorno alle variabili, nelle stringhe ASCII Art e negli argomenti delle funzioni.
+
+Ecco il codice corretto, privo dell'errore U+00A0:
+
+JavaScript
+
 let roomInput = document.getElementById("room");
 let nameInput = document.getElementById("name");
 let createBtn = document.getElementById("create");
@@ -48,7 +56,7 @@ async function poll() {
 /**
  * Converte una carta nel formato "VALORESEME" (es. "As", "10c") in ASCII Art.
  * Se la carta è coperta (es. "XX"), mostra il dorso.
- * * @param {string} card - La stringa della carta (es. "As", "10c", "XX").
+ * @param {string} card - La stringa della carta (es. "As", "10c", "XX").
  * @returns {string[]} Un array di stringhe, una per riga dell'ASCII art.
  */
 function cardToAsciiArt(card) {
@@ -71,12 +79,12 @@ function cardToAsciiArt(card) {
 
   let symbol;
   let colorClass;
-  // Modifiche qui: Uso delle entità HTML numeriche per i semi
+  // Uso delle entità HTML numeriche per i semi
   switch (suit) {
     case 's': symbol = '&#9824;'; colorClass = 'card-black'; break; // Picche (♠)
     case 'c': symbol = '&#9827;'; colorClass = 'card-black'; break; // Fiori (♣)
-    case 'h': symbol = '&#9829;'; colorClass = 'card-red';   break; // Cuori (♥)
-    case 'd': symbol = '&#9830;'; colorClass = 'card-red';   break; // Quadri (♦)
+    case 'h': symbol = '&#9829;'; colorClass = 'card-red'; break; // Cuori (♥)
+    case 'd': symbol = '&#9830;'; colorClass = 'card-red'; break; // Quadri (♦)
     default: symbol = '?'; colorClass = 'card-black'; break;
   }
 
@@ -86,16 +94,16 @@ function cardToAsciiArt(card) {
   return [
     `<span class="${colorClass}"> _____ </span>`,
     `<span class="${colorClass}">|${displayValue}. |</span>`,
-    `<span class="${colorClass}">|     |</span>`,
-    `<span class="${colorClass}">|  ${symbol}  |</span>`,
-    `<span class="${colorClass}">|     |</span>`,
+    `<span class="${colorClass}">|     |</span>`, // Spazi puliti qui
+    `<span class="${colorClass}">|  ${symbol}  |</span>`, // Spazi puliti qui
+    `<span class="${colorClass}">|     |</span>`, // Spazi puliti qui
     `<span class="${colorClass}">|.${displayValue}|</span>`,
   ];
 }
 
 /**
  * Converte un array di carte nel loro blocco di ASCII Art, affiancandole.
- * * @param {string[]} cards - Array di stringhe delle carte.
+ * @param {string[]} cards - Array di stringhe delle carte.
  * @returns {string} Il blocco HTML formattato con le carte in ASCII Art.
  */
 function cardsToAsciiBlock(cards) {
