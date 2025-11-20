@@ -15,7 +15,12 @@ let my_name = null;
 createBtn.onclick = async () => {
   let res = await fetch("/api/create_room", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({})});
   let j = await res.json();
-  if (j.ok) { room_id = j.room_id; roomInput.value = room_id; alert("Stanza creata: " + room_id); }
+  if (j.ok) { 
+    room_id = j.room_id; 
+    roomInput.value = room_id; 
+    // Sostituisci alert() con un messaggio nell'interfaccia utente (se possibile), ma per ora usiamo alert()
+    alert("Stanza creata: " + room_id); 
+  }
 }
 joinBtn.onclick = async () => {
   room_id = roomInput.value.trim();
@@ -38,144 +43,120 @@ startBtn.onclick = async () => {
 
 async function poll() {
   if (!room_id || !player_id) return;
-  let res = await fetch(`/api/state?room_id=${room_id}&player_id=${player_id}`);
-  let j = await res.json();
-  if (!j.ok) { console.log("err", j.error); return; }
-  let s = j.state;
-  renderState(s);
-}
-
-/**
- * Converte una carta nel formato "VALORESEME" (es. "As", "10c") in ASCII Art.
- * Se la carta è coperta (es. "XX"), mostra il dorso.
- * * @param {string} card - La stringa della carta (es. "As", "10c", "XX").
- * @returns {string[]} Un array di stringhe, una per riga dell'ASCII art.
- */
-function cardToAsciiArt(card) {
-  const lines = 6; // Numero di righe per ogni carta
   
-  if (card === "XX") {
-    // Dorso della carta (coperta)
-    return [
-      " _____ ",
-      "|#####|",
-      "|#####|",
-      "|#####|",
-      "|#####|",
-      " `-----' "
-    ];
+  try {
+    let res = await fetch(`/api/state?room_id=${room_id}&player_id=${player_id}`);
+    let j = await res.json();
+    if (!j.ok) { 
+      console.error("Errore polling stato:", j.error); 
+      return; 
+    }
+    let s = j.state;
+    renderState(s);
+  } catch (error) {
+    console.error("Errore di rete durante il polling:", error);
   }
-
-  const value = card.length > 2 ? card.substring(0, card.length - 1) : card[0];
-  const suit = card[card.length - 1]; // es. 's', 'c', 'h', 'd'
-
- let symbol;
-  let colorClass;
-  
-  switch (suit) {
-    // CAMBIARE DA MINUSCOLO (es. 's') A MAIUSCOLO (es. 'S')
-    case 'S': symbol = '♠'; colorClass = 'card-black'; break; // Picche
-    case 'C': symbol = '♣'; colorClass = 'card-black'; break; // Fiori
-    case 'H': symbol = '♥'; colorClass = 'card-red';   break; // Cuori
-    case 'D': symbol = '♦'; colorClass = 'card-red';   break; // Quadri
-    default: symbol = '?'; colorClass = 'card-black'; break;
-  }
-
-  // Normalizza il valore per la visualizzazione (T per 10)
-  const displayValue = (value === '10' ? 'T' : value.toUpperCase()).padEnd(2, ' ');
-  
-  return [
-    `<span class="${colorClass}"> _____ </span>`,
-    `<span class="${colorClass}">|${displayValue}. |</span>`,
-    `<span class="${colorClass}">|     |</span>`,
-    `<span class="${colorClass}">|  ${symbol}  |</span>`,
-    `<span class="${colorClass}">|     |</span>`,
-    `<span class="${colorClass}">|.${displayValue}|</span>`,
-  ];
 }
-
-/**
- * Converte un array di carte nel loro blocco di ASCII Art, affiancandole.
- * * @param {string[]} cards - Array di stringhe delle carte.
- * @returns {string} Il blocco HTML formattato con le carte in ASCII Art.
- */
-function cardsToAsciiBlock(cards) {
-  if (cards.length === 0) return "";
-  
-  const cardArt = cards.map(c => cardToAsciiArt(c));
-  const lines = cardArt[0].length; // Il numero di righe per carta (dovrebbe essere 6)
-  let outputHtml = '<pre style="display:inline-block; margin:0;">'; // Usa <pre> per mantenere la formattazione a spaziatura fissa
-
-  for (let i = 0; i < lines; i++) {
-    const line = cardArt.map(art => art[i]).join(''); // Unisce la riga i di ogni carta
-    outputHtml += line + '\n';
-  }
-  outputHtml += '</pre>';
-
-  return outputHtml;
-}
-
 
 function renderState(s) {
-  // me info
+  // Informazioni del giocatore locale
   let my = s.players.find(p=>p.id===player_id);
-  meDiv.innerHTML = my ? `<strong>Tu: ${my.name}</strong> Chips: ${my.chips} Bets: ${my.current_bet}<br>${cardsToAsciiBlock(my.hole)}` : "Non sei in stanza";
+  // Utilizza my.hole_ascii (già renderizzato come ASCII Art a 5 righe)
+  if (my) {
+    meDiv.innerHTML = `
+      <strong>Tu: ${my.name}</strong> 
+      Chips: ${my.chips} 
+      Bet Corrente: ${my.current_bet}
+      <br>
+      <pre class="card-ascii">${my.hole_ascii}</pre>
+    `;
+  } else {
+    meDiv.innerHTML = "Non sei in stanza o il tuo ID non è valido.";
+  }
   
-  // players
-  playersDiv.innerHTML = "";
+  // Giocatori al tavolo
+  playersDiv.innerHTML = "<h2>Giocatori al Tavolo</h2>";
   s.players.forEach(p=>{
-    // Se la mano è finita O il giocatore è ME stesso, mostro le carte. Altrimenti mostro "XX"
-    const cardsToShow = (p.id === player_id || s.stage === "SHOWDOWN" || s.stage === "END") 
-      ? p.hole 
-      : p.hole.map(() => "XX"); 
-    
+    // p.hole_ascii contiene la stringa ASCII corretta (nascosta o rivelata)
     let el = document.createElement("div");
-    el.className = "player";
-    // Aggiungo una classe per distinguere il giocatore di turno
-    if (p.id === s.turn_id) {
-      el.classList.add('current-turn');
-    }
+    el.className = "player" + (p.id === s.turn_id ? " current-turn" : "");
 
-    el.innerHTML = `<div>${p.name}${p.id===s.players[s.dealer_idx]?.id ? " (**D**)" : ""}</div>
+    el.innerHTML = `
+      <div>${p.name}${p.id===s.players[s.dealer_idx]?.id ? " (**D**)" : ""}</div>
       <div>Chips: ${p.chips}</div>
-      <div>Bet: ${p.current_bet}</div>
-      <div>Hole: ${cardsToAsciiBlock(cardsToShow)}</div>
-      <div>In mano: ${p.in_hand ? "Sì":"No"}</div>`;
+      <div>Bet: ${p.current_bet} / Contribuzione Totale: ${p.total_contribution}</div>
+      <div>Status: ${p.in_hand ? "In Mano" : "Fold"}${p.all_in ? " (ALL-IN)" : ""}</div>
+      <div>Hole: <pre class="card-ascii">${p.hole_ascii}</pre></div>
+    `;
     playersDiv.appendChild(el);
   });
   
-  // community
-  communityDiv.innerHTML = `<h3>Community (${s.stage})</h3>` + cardsToAsciiBlock(s.community.map(c=>c.str));
+  // Community Cards
+  // Utilizza s.community_ascii
+  communityDiv.innerHTML = `
+    <h3>Community (${s.stage}) - Pot: ${s.pot}</h3>
+    <pre class="card-ascii">${s.community_ascii}</pre>
+  `;
   
-  // controls if my turn
+  // Controlli
   controlsDiv.innerHTML = "";
   if (s.turn_id === player_id) {
+    let requiredCall = s.required_call || 0;
+    
+    let callText = requiredCall > 0 ? `Call ${requiredCall}` : 'Check';
+    let minRaise = s.last_raise_amount + requiredCall; // Raise deve essere il doppio del last_raise_amount (o BB) + il call
+    
     let fold = document.createElement("button");
     fold.innerText = "Fold"; fold.onclick = ()=>doAction("fold");
-    let check = document.createElement("button");
-    check.innerText = "Check"; check.onclick = ()=>doAction("check");
-    let call = document.createElement("button");
-    call.innerText = "Call"; call.onclick = ()=>doAction("call");
+    
+    let callOrCheck = document.createElement("button");
+    callOrCheck.innerText = callText; 
+    callOrCheck.onclick = ()=>doAction(requiredCall > 0 ? "call" : "check");
+    
     let raise = document.createElement("button");
-    raise.innerText = "Raise"; raise.onclick = ()=> {
-      let amt = prompt("Quanto vuoi rilanciare (numero)?");
+    raise.innerText = `Raise (Min ${minRaise})`; 
+    raise.onclick = ()=> {
+      let amt = prompt(`Quanto vuoi rilanciare in totale? (Minimo raise to ${minRaise + requiredCall})`);
       if (!amt) return;
       doAction("raise", parseInt(amt,10));
     };
-    controlsDiv.appendChild(fold); controlsDiv.appendChild(check); controlsDiv.appendChild(call); controlsDiv.appendChild(raise);
-} else {
-  let current = s.players.find(p => p.id === s.turn_id);
-  let turnName = current ? current.name : "nessuno";
-  controlsDiv.innerHTML = `Turno di: ${turnName}`;
-}
+    
+    controlsDiv.appendChild(fold); 
+    controlsDiv.appendChild(callOrCheck); 
+    
+    if (my.chips > requiredCall) {
+      controlsDiv.appendChild(raise);
+    }
+    
+  } else {
+    let current = s.players.find(p => p.id === s.turn_id);
+    let turnName = current ? current.name : "Nessuno";
+    controlsDiv.innerHTML = `**Turno di: ${turnName}** (Required Call: ${s.required_call || 0})`;
+  }
 }
 
 async function doAction(action, amount=0) {
-  let res = await fetch("/api/action", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({room_id, player_id, action, amount})});
-  let j = await res.json();
-  if (!j.ok) alert("Errore: " + j.error); else console.log(j.msg);
-  // update quickly
-  poll();
+  try {
+    let res = await fetch("/api/action", {
+      method:"POST", 
+      headers:{"Content-Type":"application/json"}, 
+      body:JSON.stringify({room_id, player_id, action, amount})
+    });
+    let j = await res.json();
+    if (!j.ok) {
+      // Sostituisci alert() con un modal/messaggio
+      console.error("Errore azione: ", j.error);
+      alert("Errore: " + j.error);
+    } else {
+      console.log("Azione successiva:", j.msg);
+    }
+    // Aggiorna rapidamente dopo l'azione
+    poll();
+  } catch (error) {
+    console.error("Errore di rete durante l'azione:", error);
+    alert("Errore di connessione. Riprova.");
+  }
 }
 
+// Inizio del polling
 setInterval(poll, 1000);
