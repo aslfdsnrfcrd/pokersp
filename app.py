@@ -1,11 +1,3 @@
-Assolutamente. L'errore SyntaxError: invalid non-printable character U+00A0 è causato dalla presenza di caratteri di Spazio Unificatore (Non-Breaking Space, NBSP) nel codice, spesso introdotti involontariamente durante la copia e incolla. Questi caratteri (U+00A0) devono essere sostituiti con normali spazi ASCII (U+0020).
-
-Ho revisionato e pulito l'intero codice JavaScript, sostituendo tutti i caratteri NBSP che erano presenti soprattutto attorno alle variabili, nelle stringhe ASCII Art e negli argomenti delle funzioni.
-
-Ecco il codice corretto, privo dell'errore U+00A0:
-
-JavaScript
-
 let roomInput = document.getElementById("room");
 let nameInput = document.getElementById("name");
 let createBtn = document.getElementById("create");
