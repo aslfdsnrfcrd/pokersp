@@ -56,16 +56,15 @@ class Card:
         rank_str = "10" if self.rank == "T" else self.rank
         return f"{rank_str}{self.suit}"
 
-    # INDENTAZIONE CORRETTA APPLICATA QUI SOTTO
     @staticmethod
     def _draw_single_card(rank: str, suit: str, hidden: bool = False) -> List[str]:
         """Disegna una singola carta in ASCII Art (5 righe)."""
-        # La carta hidden (coperta) deve avere la stessa larghezza (7 caratteri)
         if hidden:
+            # Carta coperta
             return [
                 "┌─────┐",
                 "│░░░░░│",
-                "│░░❓░░│",
+                "│░❓░░│",
                 "│░░░░░│",
                 "└─────┘"
             ]
@@ -73,20 +72,14 @@ class Card:
         display_rank = RANK_DISPLAY.get(rank, rank)
         symbol = SUIT_SYMBOLS.get(suit, '?')
         
-        # Allineamento:
-        # Top-left (sinistra in alto): Rank + spazio (es. 'A ') oppure '10' (due caratteri)
-        rank_top = f"{display_rank:<2}"
+        # Gestisce i rank con due caratteri (es. 10)
+        rank_pad = display_rank + " " if len(display_rank) == 1 else display_rank
         
-        # Bottom-right (destra in basso): Rank allineato a destra
-        rank_bottom = f"{display_rank:>2}"
-
-        # Nuova struttura per una simmetria e allineamento migliore:
-        # Larghezza fissa a 7 caratteri (5 interni + 2 bordi)
         return [
             "┌─────┐",
-            f"│{rank_top} {symbol}│", # Es: |A  ♠| o |10 ♠|
-            f"│  {symbol}  │",      # Simbolo centrale
-            f"│ {symbol} {rank_bottom}│", # Es: | ♠  A| o | ♠ 10|
+            f"│{rank_pad}  {symbol}│",
+            "│  {symbol}  │".format(symbol=symbol),
+            f"│{symbol}  {rank_pad}│".format(rank_pad=rank_pad, symbol=symbol), # Inverte rank/suit per simmetria
             "└─────┘"
         ]
 
