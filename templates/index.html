@@ -3,49 +3,94 @@
 <head>
     <meta charset="utf-8">
     <title>Texas Hold'em - Render Demo (ASCII Art)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: Arial, Helvetica, sans-serif; padding: 20px; }
-        .player { border: 1px solid #ccc; padding: 8px; margin: 4px; display:inline-block; vertical-align: top; }
-        #community { margin-top: 10px; }
-        button { margin: 4px; }
-
-        /* --- STILI NECESSARI PER L'ASCII ART --- */
+        body { 
+            font-family: 'Inter', Arial, Helvetica, sans-serif; 
+            padding: 20px; 
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        h1, h2, h3 { color: #004d40; }
         
-        /* 1. Font a spaziatura fissa essenziale per l'allineamento */
-        #me pre, .player pre, #community pre {
-            font-family: monospace; 
-            line-height: 1.0;       /* Compressa le righe delle carte */
-            margin: 5px 0;          /* Spazio sopra/sotto il blocco carte */
+        .player { 
+            border: 2px solid #ccc; 
+            padding: 12px; 
+            margin: 8px; 
+            display:inline-block; 
+            vertical-align: top;
+            width: 200px; /* Larghezza fissa per allineamento */
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            background-color: #ffffff;
         }
         
-        /* 2. Colori per i semi */
-        .card-black { color: black; }
-        .card-red { color: red; }
+        #community { 
+            margin-top: 20px; 
+            padding: 15px; 
+            border: 2px solid #004d40;
+            border-radius: 10px;
+            background-color: #e0f2f1;
+        }
+        
+        button { 
+            margin: 5px; 
+            padding: 8px 15px;
+            background-color: #00796b;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover { background-color: #004d40; }
 
-        /* Stile aggiuntivo per evidenziare il giocatore di turno (opzionale) */
+        /* --- STILI ESSENZIALI PER L'ALLINEAMENTO ASCII --- */
+        
+        /* Font a spaziatura fissa essenziale per l'allineamento */
+        #me pre.card-ascii, .player pre.card-ascii, #community pre.card-ascii {
+            font-family: monospace; 
+            line-height: 1.0;       /* Compressa le righe delle carte ASCII a 5 righe */
+            margin: 5px 0;          /* Spazio sopra/sotto il blocco carte */
+            white-space: pre;       /* Mantiene la formattazione del codice Python */
+        }
+
+        /* Stile per evidenziare il giocatore di turno */
         .player.current-turn {
-            border: 2px solid orange;
-            background-color: #fffbe6;
+            border: 3px solid #ff9800; /* Arancione brillante */
+            background-color: #fff3e0;
+        }
+        
+        @media (max-width: 600px) {
+            .player {
+                width: 100%;
+                display: block;
+                margin: 8px 0;
+            }
         }
 
     </style>
 </head>
 <body>
     <h1>Texas Hold'em - Demo</h1>
-    <p>Le carte sono visualizzate in formato ASCII Art.</p>
+    <p>Le carte sono visualizzate in formato <code style="font-family: monospace; background: #eee; padding: 2px 4px; border-radius: 3px;">ASCII Art</code> a 5 righe, pre-renderizzate dal server per un allineamento perfetto.</p>
     <hr/>
     <div>
-        Room ID: <input id="room" /> <button id="create">Crea stanza</button>
+        Room ID: <input id="room" placeholder="Inserisci Room ID" /> 
+        <button id="create">Crea stanza</button>
         <br/>
-        Nome: <input id="name" /> <button id="join">Join</button>
+        Nome: <input id="name" placeholder="Il tuo nome" /> 
+        <button id="join">Join</button>
         <button id="start">Start mano</button>
     </div>
     <hr/>
+    
     <div id="me"></div>
     <div id="players"></div>
     <div id="community"></div>
-    <div id="controls"></div>
+    <div id="controls" style="margin-top: 20px; padding: 10px; border: 1px dashed #ccc; border-radius: 5px;"></div>
 
-    <script src="/static/app.js"></script>
+    <!-- Il file app.js contiene la logica del frontend -->
+    <script src="/static/app.js"></script> 
 </body>
 </html>
