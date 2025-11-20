@@ -77,10 +77,15 @@ function renderState(s) {
   // Giocatori al tavolo
   playersDiv.innerHTML = "<h2>Giocatori al Tavolo</h2>";
   s.players.forEach(p=>{
-    // p.hole_ascii contiene la stringa ASCII corretta (nascosta o rivelata)
+    // Controlla se è il giocatore locale (problema carte duplicate)
+    if (p.id === player_id) {
+        return; // Non mostrare la card box di 'me' due volte
+    }
+
     let el = document.createElement("div");
     el.className = "player" + (p.id === s.turn_id ? " current-turn" : "");
 
+    // p.hole_ascii contiene la stringa ASCII corretta (nascosta o rivelata)
     el.innerHTML = `
       <div>${p.name}${p.id===s.players[s.dealer_idx]?.id ? " (**D**)" : ""}</div>
       <div>Chips: ${p.chips}</div>
@@ -116,7 +121,7 @@ function renderState(s) {
     let raise = document.createElement("button");
     raise.innerText = `Raise (Min ${minRaise})`; 
     raise.onclick = ()=> {
-      let amt = prompt(`Quanto vuoi rilanciare in totale? (Minimo raise to ${minRaise + requiredCall})`);
+      let amt = prompt(`Quanto vuoi rilanciare in totale? (Minimo raise to ${minRaise})`);
       if (!amt) return;
       doAction("raise", parseInt(amt,10));
     };
