@@ -48,7 +48,7 @@ async function poll() {
 /**
  * Converte una carta nel formato "VALORESEME" (es. "As", "10c") in ASCII Art.
  * Se la carta è coperta (es. "XX"), mostra il dorso.
- * * @param {string} card - La stringa della carta (es. "As", "10c", "XX").
+ * @param {string} card - La stringa della carta (es. "As", "10c", "XX").
  * @returns {string[]} Un array di stringhe, una per riga dell'ASCII art.
  */
 function cardToAsciiArt(card) {
@@ -71,11 +71,12 @@ function cardToAsciiArt(card) {
 
   let symbol;
   let colorClass;
+  // Uso delle entità HTML numeriche per i semi
   switch (suit) {
-    case 's': symbol = '♠'; colorClass = 'card-black'; break; // Picche
-    case 'c': symbol = '♣'; colorClass = 'card-black'; break; // Fiori
-    case 'h': symbol = '♥'; colorClass = 'card-red';   break; // Cuori
-    case 'd': symbol = '♦'; colorClass = 'card-red';   break; // Quadri
+    case 's': symbol = '&#9824;'; colorClass = 'card-black'; break; // Picche (♠)
+    case 'c': symbol = '&#9827;'; colorClass = 'card-black'; break; // Fiori (♣)
+    case 'h': symbol = '&#9829;'; colorClass = 'card-red'; break; // Cuori (♥)
+    case 'd': symbol = '&#9830;'; colorClass = 'card-red'; break; // Quadri (♦)
     default: symbol = '?'; colorClass = 'card-black'; break;
   }
 
@@ -85,16 +86,16 @@ function cardToAsciiArt(card) {
   return [
     `<span class="${colorClass}"> _____ </span>`,
     `<span class="${colorClass}">|${displayValue}. |</span>`,
-    `<span class="${colorClass}">|     |</span>`,
-    `<span class="${colorClass}">|  ${symbol}  |</span>`,
-    `<span class="${colorClass}">|     |</span>`,
+    `<span class="${colorClass}">|     |</span>`, 
+    `<span class="${colorClass}">|  ${symbol}  |</span>`, 
+    `<span class="${colorClass}">|     |</span>`, 
     `<span class="${colorClass}">|.${displayValue}|</span>`,
   ];
 }
 
 /**
  * Converte un array di carte nel loro blocco di ASCII Art, affiancandole.
- * * @param {string[]} cards - Array di stringhe delle carte.
+ * @param {string[]} cards - Array di stringhe delle carte.
  * @returns {string} Il blocco HTML formattato con le carte in ASCII Art.
  */
 function cardsToAsciiBlock(cards) {
@@ -117,6 +118,7 @@ function cardsToAsciiBlock(cards) {
 function renderState(s) {
   // me info
   let my = s.players.find(p=>p.id===player_id);
+  // Ho aggiunto il blocco carte qui
   meDiv.innerHTML = my ? `<strong>Tu: ${my.name}</strong> Chips: ${my.chips} Bets: ${my.current_bet}<br>${cardsToAsciiBlock(my.hole)}` : "Non sei in stanza";
   
   // players
@@ -143,6 +145,7 @@ function renderState(s) {
   });
   
   // community
+  // Ho aggiunto il blocco carte qui
   communityDiv.innerHTML = `<h3>Community (${s.stage})</h3>` + cardsToAsciiBlock(s.community.map(c=>c.str));
   
   // controls if my turn
