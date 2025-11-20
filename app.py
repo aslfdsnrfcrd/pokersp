@@ -86,9 +86,9 @@ function cardToAsciiArt(card) {
   return [
     `<span class="${colorClass}"> _____ </span>`,
     `<span class="${colorClass}">|${displayValue}. |</span>`,
-    `<span class="${colorClass}">|     |</span>`, // Spazi puliti qui
-    `<span class="${colorClass}">|  ${symbol}  |</span>`, // Spazi puliti qui
-    `<span class="${colorClass}">|     |</span>`, // Spazi puliti qui
+    `<span class="${colorClass}">|     |</span>`, 
+    `<span class="${colorClass}">|  ${symbol}  |</span>`, 
+    `<span class="${colorClass}">|     |</span>`, 
     `<span class="${colorClass}">|.${displayValue}|</span>`,
   ];
 }
