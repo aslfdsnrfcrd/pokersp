@@ -56,7 +56,8 @@ class Card:
         rank_str = "10" if self.rank == "T" else self.rank
         return f"{rank_str}{self.suit}"
 
-@staticmethod
+    # INDENTAZIONE CORRETTA APPLICATA QUI SOTTO
+    @staticmethod
     def _draw_single_card(rank: str, suit: str, hidden: bool = False) -> List[str]:
         """Disegna una singola carta in ASCII Art (5 righe)."""
         # La carta hidden (coperta) deve avere la stessa larghezza (7 caratteri)
