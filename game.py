@@ -398,7 +398,7 @@ class Game:
                 return idx
         return -1 
 
-    # --- Logica Turno e Avanzamento (non modificata) ---
+    # --- Logica Turno e Avanzamento ---
 
     def all_but_one_folded(self):
         inplay=[p for p in self.players if p.in_hand]
@@ -409,39 +409,25 @@ class Game:
             
         active_in_hand = [p for p in self.players if p.in_hand]
         
-        # Giocatori che DEVONO agire (non foldati e non All-in che hanno già matchato)
-        # must_act: non foldato E (o non è all-in OPPURE la sua puntata è minore di current_bet)
+        # must_act: giocatori che DEVONO agire (non foldati e non All-in che hanno già matchato)
+        # Non deve agire chi è all-in E la sua puntata è uguale alla current_bet
         must_act = [p for p in active_in_hand if not (p.all_in and p.current_bet == self.current_bet)]
         
         if not must_act:
             # Tutti gli attivi sono All-in o hanno matchato All-in. Round finito.
             return True
         
-        # Controlla se tutti gli attivi rimanenti (quelli che non sono All-in e matchati)
-        # hanno matchato la puntata corrente.
-        all_active_matched_bet = all(p.current_bet == self.current_bet for p in must_act)
+        # 1. Troviamo il prossimo giocatore che deve agire (dopo l'ultimo)
+        # Iniziamo dal prossimo dopo il raiser. L'indice del turno è già stato aggiornato
+        # alla fine dell'azione precedente, quindi il prossimo turno è quello attuale.
         
-        if not all_active_matched_bet: return False 
+        # 2. Tutti hanno chiamato/checkato: tutti i must_act devono avere current_bet == self.current_bet
+        all_active_matched_bet = all(p.current_bet == self.current_bet for p in active_in_hand)
         
-        # Requisito di Ciclo Completo: 
-        # Se tutti hanno matchato, dobbiamo assicurarci che il turno sia tornato all'ultimo raiser/starter.
-        
-        # Controlliamo il prossimo giocatore ad agire
-        next_idx = self.get_next_player_in_hand_idx(self.turn_idx)
-        
-        # Caso 1: Nessun raise e siamo tornati all'iniziatore (solo check)
-        if self.current_bet == 0 and self.stage != "preflop":
-             # Se il prossimo ad agire sarebbe l'iniziatore del round (o se non c'è più nessuno da far agire), il round è finito.
-             # Qui si è semplificato il check: se tutti i 'must_act' hanno puntato uguale a current_bet (che è 0), il round è finito
-             # perché tutti hanno fatto check/fold (gestito sopra).
-             return all_active_matched_bet
-
-        # Caso 2: C'è stato un raise (current_bet > 0)
-        if self.current_bet > 0:
-            # Se tutti gli attivi in mano hanno matchato la puntata corrente (incluso il raiser stesso che ha stabilito la puntata)
-            # il round è finito. must_act contiene solo chi *deve* agire; se è vuoto (gestito sopra) o tutti hanno puntato uguale,
-            # significa che tutti hanno avuto il loro turno dall'ultimo raise.
-            return all_active_matched_bet
+        if all_active_matched_bet:
+            # Se tutti gli attivi in mano hanno matchato la puntata corrente, il round è finito.
+            # Questo copre sia il caso Check Round (current_bet=0) sia il caso Bet Round.
+            return True
         
         return False # Default: round non finito
 
@@ -470,6 +456,9 @@ class Game:
             self.stage="showdown"
         
         # Reset delle puntate per il nuovo round
+        for p in self.players:
+            p.current_bet = 0
+            
         self.current_bet=0
         self.last_raiser_idx=-1
         self.last_raise_amount=self.bb
@@ -478,7 +467,7 @@ class Game:
             # La mano è finita, assegna i piatti e imposta il flag risolto
             results = self.collect_pots_and_award()
             self.is_hand_resolved = True 
-            self.turn_idx = -1 # <--- FIX: Resetta il turno quando la mano è risolta
+            self.turn_idx = -1 
             return True, f"Showdown! Risultati: {results}"
 
         # Determina il primo giocatore ad agire post-flop
@@ -491,7 +480,7 @@ class Game:
              self.stage = "showdown"
              results = self.collect_pots_and_award()
              self.is_hand_resolved = True
-             self.turn_idx = -1 # <--- FIX: Resetta il turno quando la mano è risolta
+             self.turn_idx = -1 
              return True, f"Showdown forzato! Risultati: {results}"
 
         self.turn_idx = first_to_act_idx
@@ -526,6 +515,7 @@ class Game:
             return True, action_description
         else:
             # Fallback per gestire round finiti non intercettati da is_betting_round_over
+            # Se nessuno deve agire, forza l'avanzamento.
             return self.advance_stage() or (True, action_description + ". Avanzamento di fase forzato.")
 
     def player_action(self,player_id,action,amount=0)->Tuple[bool,str]:
