@@ -121,34 +121,21 @@ function renderState(s) {
   let my = s.players.find(p=>p.id===player_id);
   meDiv.innerHTML = my ? `<strong>Tu: ${my.name}</strong> Chips: ${my.chips} Bets: ${my.current_bet}<br>${cardsToAsciiBlock(my.hole)}` : "Non sei in stanza";
   
- // players
-playersDiv.innerHTML = "";
-s.players.forEach(p=>{
-    // 🛑 AGGIUNGI QUI IL CONTROLLO PER SALTARE IL GIOCATORE CORRENTE
-    if (p.id === player_id) {
-        // Se il giocatore corrente ha già le sue carte renderizzate in #me, lo saltiamo qui
-        return; 
-    }
-    
-    // Se la mano è finita O il giocatore è ME stesso (già escluso sopra), mostro le carte. Altrimenti mostro "XX"
-    const cardsToShow = (s.stage === "SHOWDOWN" || s.stage === "END") 
-      ? p.hole 
-      : p.hole.map(() => "XX"); 
-    
-    let el = document.createElement("div");
-    el.className = "player";
-    // Aggiungo una classe per distinguere il giocatore di turno
-    if (p.id === s.turn_id) {
-      el.classList.add('current-turn');
-    }
+  // players
+  playersDiv.innerHTML = "";
+  s.players.forEach(p=>{
+    // Se la mano è finita O il giocatore è ME stesso, mostro le carte. Altrimenti mostro "XX"
+    const cardsToShow = (p.id === player_id || s.stage === "SHOWDOWN" || s.stage === "END") 
+      ? p.hole 
+      : p.hole.map(() => "XX"); 
+    
+    let el = document.createElement("div");
+    el.className = "player";
+    // Aggiungo una classe per distinguere il giocatore di turno
+    if (p.id === s.turn_id) {
+      el.classList.add('current-turn');
+    }
 
-    el.innerHTML = `<div>${p.name}${p.id===s.players[s.dealer_idx]?.id ? " (**D**)" : ""}</div>
-      <div>Chips: ${p.chips}</div>
-      <div>Bet: ${p.current_bet}</div>
-      <div>Hole: ${cardsToAsciiBlock(cardsToShow)}</div>
-      <div>In mano: ${p.in_hand ? "Sì":"No"}</div>`;
-    playersDiv.appendChild(el);
-});
     el.innerHTML = `<div>${p.name}${p.id===s.players[s.dealer_idx]?.id ? " (**D**)" : ""}</div>
       <div>Chips: ${p.chips}</div>
       <div>Bet: ${p.current_bet}</div>
