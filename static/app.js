@@ -83,17 +83,16 @@ function cardToAsciiArt(card) {
   // Normalizza il valore per la visualizzazione (T per 10)
   const displayValue = (value === '10' ? 'T' : value.toUpperCase()).padEnd(2, ' ');
   
-  // Rimosso l'eccesso di spazi non-ASCII per prevenire U+00A0 o caratteri invalidi nelle stringhe
+  // ATTENZIONE: Qui ho usato template literal solo dove necessario per l'interpolazione
   return [
     `<span class="${colorClass}"> _____ </span>`,
     `<span class="${colorClass}">|${displayValue}. |</span>`,
-    `<span class="${colorClass}">|     |</span>`, // Spazi puliti
-    `<span class="${colorClass}">|  ${symbol}  |</span>`, // Spazi puliti
-    `<span class="${colorClass}">|     |</span>`, // Spazi puliti
+    `<span class="${colorClass}">|     |</span>`, 
+    `<span class="${colorClass}">|  ${symbol}  |</span>`, 
+    `<span class="${colorClass}">|     |</span>`, 
     `<span class="${colorClass}">|.${displayValue}|</span>`,
   ];
 }
-
 /**
  * Converte un array di carte nel loro blocco di ASCII Art, affiancandole.
  * @param {string[]} cards - Array di stringhe delle carte.
