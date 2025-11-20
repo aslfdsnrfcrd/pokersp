@@ -16,10 +16,10 @@ HAND_RANKS = [
 
 # --- Mappa i semi e i rank per la visualizzazione ASCII ---
 SUIT_SYMBOLS = {
-    "S": "♠",
-    "H": "♥",
-    "D": "♦",
-    "C": "♣",
+    "S": "♠", # Spade
+    "H": "♥", # Cuori
+    "D": "♦", # Quadri
+    "C": "♣", # Fiori
 }
 RANK_DISPLAY = {
     "T": "10",
@@ -44,515 +44,608 @@ def normalize_rank(r: str) -> str:
 
 class Card:
     """Rappresenta una singola carta."""
-    def __init__(self, rank: str, suit: str):
-        self.rank = normalize_rank(rank)
+    def __init__(self, rank, suit):
+        rank = normalize_rank(rank)
+        if rank not in RANKS:
+            raise ValueError(f"Rank non valido: {rank}")
+        self.rank = rank
         self.suit = suit
-        self.value = RANK_VALUE[self.rank]
-        self.str = f"{self.rank}{self.suit}"
-        self.display = f"{RANK_DISPLAY[self.rank]}{SUIT_SYMBOLS[self.suit]}"
+        self.value = RANK_VALUE[rank]
 
     def __repr__(self):
-        return self.str
-    
-    def __lt__(self, other):
-        return self.value < other.value
+        rank_str = "10" if self.rank == "T" else self.rank
+        return f"{rank_str}{self.suit}"
+
+    @staticmethod
+    def _draw_single_card(rank: str, suit: str, hidden: bool = False) -> List[str]:
+        """Disegna una singola carta in ASCII Art (5 righe)."""
+        if hidden:
+            # Carta coperta
+            return [
+                "┌─────┐",
+                "│░░░░░│",
+                "│░❓░░│",
+                "│░░░░░│",
+                "└─────┘"
+            ]
+
+        display_rank = RANK_DISPLAY.get(rank, rank)
+        symbol = SUIT_SYMBOLS.get(suit, '?')
+        
+        # Gestisce i rank con due caratteri (es. 10)
+        # Se è "10", l'imbottitura è 10. Se è 'A', l'imbottitura è 'A '
+        rank_pad = display_rank + " " if len(display_rank) == 1 else display_rank
+        
+        return [
+            "┌─────┐",
+            f"│{rank_pad}  {symbol}│",
+            f"│  {symbol}  │",
+            f"│{symbol}  {rank_pad}│",
+            "└─────┘"
+        ]
+
+    @staticmethod
+    def draw_hand(cards_str: List[str]) -> str:
+        """Combina un elenco di carte (formato 'RH' o 'XX') in un blocco di testo."""
+        if not cards_str:
+            return ""
+        
+        # Determina le righe per ogni carta
+        card_lines = []
+        for c_str in cards_str:
+            if c_str == "XX":
+                # La logica _draw_single_card usa 'hidden=True' per le carte nascoste
+                card_lines.append(Card._draw_single_card("X", "X", hidden=True))
+            else:
+                rank = c_str[:-1]
+                suit = c_str[-1]
+                # Normalizzazione per la ricerca in RANKS (es. '10' -> 'T')
+                if rank == "10": rank = "T"
+                card_lines.append(Card._draw_single_card(rank, suit, hidden=False))
+                
+        # Combina le righe
+        output = []
+        # Le carte sono alte 5 righe
+        for i in range(5):
+            line = " ".join(lines[i] for lines in card_lines)
+            output.append(line)
+            
+        return "\n".join(output)
 
     def to_dict(self):
-        """Converte la carta in un dizionario per l'invio al client."""
-        # Colore basato sul seme per il rendering
-        color = "red" if self.suit in ("H", "D") else "black"
-        return {"str": self.str, "display": self.display, "color": color}
-
+        """Ritorna la rappresentazione JSON della carta."""
+        return {
+            "rank": ("10" if self.rank == "T" else self.rank),
+            "suit": self.suit,
+            "str": repr(self),
+        }
 
 class Deck:
-    """Rappresenta il mazzo di 52 carte."""
+    """Rappresenta il mazzo di 52 carte e gestisce la pesca."""
     def __init__(self):
-        self.cards = [Card(r, s) for r in RANKS for s in SUITS]
-        self.reset()
-
-    def reset(self):
         self.cards = [Card(r, s) for r in RANKS for s in SUITS]
         random.shuffle(self.cards)
 
-    def deal(self, count: int = 1) -> List[Card]:
-        """Distribuisce un certo numero di carte."""
-        if len(self.cards) < count:
-            raise ValueError("Mazzo esaurito!")
-        return [self.cards.pop() for _ in range(count)]
-
+    def draw(self, n=1):
+        """Pesca n carte dal mazzo."""
+        drawn = self.cards[:n]
+        self.cards = self.cards[n:]
+        return drawn
 
 class Player:
     """Rappresenta un giocatore al tavolo."""
-    def __init__(self, name: str, chips: int = 1000):
-        self.id = str(uuid4())
+    def __init__(self, name):
+        self.id = str(uuid4())[:8]
         self.name = name
-        self.chips = chips
-        self.hole: List[Card] = [] # Carte in mano
-        self.bet_current_stage: int = 0 # Totale puntato in questo giro di puntate
-        self.bet_total_hand: int = 0 # Totale puntato in tutta la mano (per side pot)
-        self.in_hand: bool = True # Flag se il giocatore è ancora attivo nella mano
-        self.is_all_in: bool = False # Flag se il giocatore è all-in
-        self.last_action: Optional[str] = None # Ultima azione effettuata
+        self.chips = 1000
+        self.hole: List[Card] = []
+        self.in_hand = True
+        self.current_bet = 0
+        self.all_in = False
+        self.total_contribution = 0 
 
+    def to_public(self, reveal=False):
+        """Ritorna lo stato pubblico del giocatore, rivelando le carte se `reveal=True`."""
+        card_strings = [repr(c) for c in self.hole] if reveal else (len(self.hole) * ["XX"])
 
-    def to_dict(self, include_hole: bool = False) -> Dict:
-        """Converte il giocatore in un dizionario per l'invio al client."""
-        data = {
+        return {
             "id": self.id,
             "name": self.name,
             "chips": self.chips,
-            "bet_current_stage": self.bet_current_stage,
-            "bet_total_hand": self.bet_total_hand,
             "in_hand": self.in_hand,
-            "is_all_in": self.is_all_in,
-            "last_action": self.last_action,
+            "current_bet": self.current_bet,
+            "all_in": self.all_in,
+            "total_contribution": self.total_contribution,
+            "hole": card_strings, # Manteniamo la lista di stringhe brevi
+            "hole_ascii": Card.draw_hand(card_strings) # NUOVO CAMPO ASCII
         }
-        if include_hole:
-            data["hole"] = [c.to_dict() for c in self.hole]
-        else:
-            data["hole"] = []
-        return data
 
+# --- Funzioni Texas Hold'em per l'Evaluation della Mano (non modificate) ---
 
-def best_from_seven(cards: List[Card]) -> Tuple:
-    """
-    Funzione per trovare la migliore mano di poker di 5 carte da 7 carte.
-    Restituisce una tupla (rank_value, kicker_tuple).
-    Il rank_value è un indice da 0 (High Card) a 8 (Straight Flush).
-    """
-    # [Image of Poker Hand Ranks]
-    # Questa è una semplificazione. La logica completa è complessa e richiede una
-    # libreria di valutazione mani. Qui usiamo una logica basilare solo per la demo.
+def is_straight(values):
+    vals = sorted(set(values), reverse=True)
+    if 14 in vals: vals.append(1) # Assi per scala bassa (A, 5, 4, 3, 2)
+    for i in range(len(vals)-4):
+        window = vals[i:i+5]
+        if len(window)==5 and all(window[j]-window[j+1]==1 for j in range(4)):
+            return window[0] # Ritorna il valore della carta più alta nella scala
+    return None
 
-    values = sorted([c.value for c in cards], reverse=True)
-    ranks_set = set(values)
+def evaluate_5cards(cards: List[Card]):
+    values = sorted((c.value for c in cards), reverse=True)
+    counts = {}
+    for v in values: counts[v] = counts.get(v,0)+1
+    by_count_then_value = sorted(counts.items(), key=lambda kv:(-kv[1],-kv[0]))
     
-    # Esempio banale: Pair
-    for r in ranks_set:
-        if values.count(r) == 2:
-            return (1, (r,)) # Rank 1: One Pair. In una vera implementazione servirebbero i kicker.
+    suit_counts={}
+    for c in cards: suit_counts.setdefault(c.suit,[]).append(c.value)
 
-    # High Card
-    return (0, tuple(values[:5]))
+    # 8. Straight Flush
+    if len(suit_counts)==1 and len(values)>=5:
+        s=list(suit_counts.keys())[0]
+        vals=suit_counts[s]
+        fh=is_straight(sorted(vals,reverse=True))
+        if fh: return (8,(fh,))
+            
+    # 7. Four of a Kind
+    if by_count_then_value[0][1]==4:
+        four=by_count_then_value[0][0]
+        kicker=max(v for v in values if v!=four)
+        return (7,(four,kicker))
+        
+    # 6. Full House
+    if by_count_then_value[0][1]==3 and len(by_count_then_value)>1 and by_count_then_value[1][1]>=2:
+        return (6,(by_count_then_value[0][0],by_count_then_value[1][0]))
+        
+    # 5. Flush
+    for s in SUITS:
+        suited=sorted([c.value for c in cards if c.suit==s],reverse=True)
+        if len(suited)>=5: return (5,tuple(suited[:5]))
+        
+    # 4. Straight
+    straight_high=is_straight(values)
+    if straight_high: return (4,(straight_high,))
+    
+    # 3. Three of a Kind
+    if by_count_then_value[0][1]==3:
+        three=by_count_then_value[0][0]
+        kickers=[v for v in values if v!=three][:2]
+        return (3,(three,)+tuple(kickers))
+        
+    # 2. Two Pair
+    if by_count_then_value[0][1]==2 and len(by_count_then_value)>1 and by_count_then_value[1][1]==2:
+        hp=by_count_then_value[0][0]; lp=by_count_then_value[1][0]
+        kicker=[v for v in values if v not in [hp, lp]][0]
+        return (2,(hp,lp,kicker))
+        
+    # 1. One Pair
+    if by_count_then_value[0][1]==2:
+        pair=by_count_then_value[0][0]
+        kickers=[v for v in values if v!=pair][:3]
+        return (1,(pair,)+tuple(kickers))
+        
+    # 0. High Card
+    return (0,tuple(values[:5]))
 
+def best_from_seven(seven):
+    """Trova la migliore mano di 5 carte da 7 carte totali."""
+    best=(-1,())
+    for combo in itertools.combinations(seven,5):
+        score=evaluate_5cards(list(combo))
+        if score>best: best=score
+    return best
+
+# --- Classe Game ---
 
 class Game:
-    """Contiene lo stato del gioco e la logica."""
-    def __init__(self, max_players: int = 4):
-        self.max_players = max_players
-        self.players: List[Player] = []
-        self.deck = Deck()
-        self.community: List[Card] = []
-        self.pot: int = 0
-        self.started: bool = False
-        self.stage: str = "Pre-flop" # Pre-flop, Flop, Turn, River, Showdown
-        self.turn_index: int = -1 # Indice del giocatore di turno
-        self.turn_id: Optional[str] = None # ID del giocatore di turno
-        self.dealer_index: int = -1 # Indice del dealer (per posizioni)
-        self.max_bet_current_stage: int = 0 # Puntata più alta fatta in questo giro
-        self.min_raise_amount: int = 0 # Minimo importo per un rilancio (semplificato)
-        self.last_bet_size: int = 0 # Dimensione dell'ultima puntata/rilancio
+    """Gestisce lo stato e la logica del gioco Texas Hold'em."""
+    def __init__(self,max_players=4,sb=10,bb=20):
+        self.players: List[Player]=[]
+        self.max_players=max_players
+        self.sb=sb
+        self.bb=bb
+        self.deck: Optional[Deck]=None
+        self.community: List[Card]=[]
+        self.pot=0
+        self.dealer_idx=0
+        self.current_bet=0
+        self.turn_idx=-1 # Inizializza a -1 per non avere turni attivi
+        self.started=False
+        self.stage="waiting"
+        self.last_raiser_idx=-1
+        self.last_raise_amount=bb
+        self.initial_bet_round_starter_idx = -1 
+        self.is_hand_resolved = False 
 
-    def add_player(self, name: str) -> Optional[str]:
-        if len(self.players) < self.max_players:
-            player = Player(name)
-            self.players.append(player)
-            return player.id
+    def add_player(self,name)->str:
+        if len(self.players)>=self.max_players: raise Exception("Room full")
+        p=Player(name)
+        self.players.append(p)
+        return p.id
+
+    def find_player(self,pid)->Optional[Player]:
+        for p in self.players:
+            if p.id==pid: return p
         return None
 
-    def start_hand(self) -> Tuple[bool, str]:
-        if len(self.players) < 2:
-            return False, "Non ci sono abbastanza giocatori (minimo 2)."
-        
-        # 1. Reset
-        self.started = True
-        self.deck.reset()
+    def reset_for_new_hand(self):
+        self.deck = None
         self.community = []
         self.pot = 0
-        self.stage = "Pre-flop"
-        self.max_bet_current_stage = 0
-        self.min_raise_amount = 0
-        self.last_bet_size = 0
+        self.current_bet = 0
+        self.turn_idx = -1
+        self.started = False
+        self.stage = "waiting"
+        self.last_raiser_idx = -1
+        self.last_raise_amount = self.bb
+        self.initial_bet_round_starter_idx = -1
+        self.is_hand_resolved = False 
+
+    # --- Gestione pot e betting ---
+    def flush_current_bets_to_pot(self):
+        bets=sum(p.current_bet for p in self.players)
+        if bets>0:
+            self.pot+=bets
+            for p in self.players: p.current_bet=0
+
+    def start_hand(self)->Tuple[bool,str]:
+        if self.is_hand_resolved:
+            self.reset_for_new_hand()
+            
+        if len(self.players)<2: return False,"Serve almeno 2 giocatori"
+        active=[p for p in self.players if p.chips>0]
+        if len(active)<2: return False,"Non ci sono abbastanza giocatori con fiches"
+        self.players=active
         
-        # Aggiorna il dealer (semplificato, solo un avanzamento ciclico)
-        self.dealer_index = (self.dealer_index + 1) % len(self.players)
-        
-        active_players = [p for p in self.players if p.chips > 0]
-        if len(active_players) < 2:
-             return False, "Non ci sono abbastanza giocatori attivi."
-        
-        # 2. Reset Giocatori (solo i giocatori attivi)
+        # Inizializzazione della mano
         for p in self.players:
-            p.hole = []
-            p.bet_current_stage = 0
-            p.bet_total_hand = 0
-            p.in_hand = p.chips > 0 # Rimuovi i giocatori a 0 chips dalla mano
-            p.is_all_in = False
-            p.last_action = None
+            p.hole=[]
+            p.in_hand=True
+            p.current_bet=0
+            p.all_in=False
+            p.total_contribution = 0 
+            
+        # Avanza il dealer (sulla nuova lista di giocatori attivi)
+        if self.started:
+            self.dealer_idx = (self.dealer_idx + 1) % len(self.players)
+            
+        self.deck=Deck()
+        self.community=[]
+        self.pot=0
+        self.current_bet=0
+        self.started=True
+        self.stage="preflop"
+        self.last_raiser_idx=-1
+        self.last_raise_amount=self.bb
+        
+        # Distribuzione carte
+        for _ in range(2):
+            for p in self.players: 
+                if self.deck.cards: p.hole.append(self.deck.draw(1)[0])
+        
+        # Blinds
+        sb_idx=(self.dealer_idx+1)%len(self.players)
+        bb_idx=(self.dealer_idx+2)%len(self.players)
+        
+        # Small Blind
+        sb_player=self.players[sb_idx]
+        sb_amt=min(self.sb,sb_player.chips)
+        sb_player.chips-=sb_amt; sb_player.current_bet=sb_amt; sb_player.total_contribution+=sb_amt; sb_player.all_in=sb_player.chips==0
 
-        # 3. Distribuzione
-        for _ in range(2): # 2 carte a testa
-            for p in self.players:
-                if p.in_hand:
-                    p.hole.extend(self.deck.deal())
+        # Big Blind
+        bb_player=self.players[bb_idx]
+        bb_amt=min(self.bb,bb_player.chips)
+        bb_player.chips-=bb_amt; bb_player.current_bet=bb_amt; bb_player.total_contribution+=bb_amt; bb_player.all_in=bb_player.chips==0
+        
+        self.pot+=sb_amt+bb_amt
+        self.current_bet=bb_amt
+        
+        # Primo a parlare pre-flop è UTG (dopo BB)
+        self.turn_idx=(bb_idx+1)%len(self.players) 
+        self.last_raiser_idx=bb_idx 
+        self.initial_bet_round_starter_idx = self.turn_idx
 
-        # 4. Blinds (Semplificato: Blind fisso a 10 e puntata iniziale)
-        # La logica dei blinds (SB/BB) richiede la gestione delle posizioni,
-        # qui usiamo una versione semplice. Il primo giocatore dopo il dealer paga il "Blind".
-        
-        # Giocatore subito dopo il dealer (indice ciclico)
-        def get_next_active_player_index(start_index):
-            for i in range(1, len(self.players) + 1):
-                idx = (start_index + i) % len(self.players)
-                if self.players[idx].in_hand:
-                    return idx
-            return -1 # Non dovrebbe succedere se ci sono >= 2 giocatori attivi
+        return True,"Mano iniziata"
 
-        small_blind_index = get_next_active_player_index(self.dealer_index)
-        big_blind_index = get_next_active_player_index(small_blind_index)
-        
-        blind_amount = 10
-        
-        # Paga il BB
-        bb_player = self.players[big_blind_index]
-        bet_bb = min(blind_amount * 2, bb_player.chips)
-        self.do_bet(bb_player, bet_bb)
-        
-        # Paga il SB
-        sb_player = self.players[small_blind_index]
-        bet_sb = min(blind_amount, sb_player.chips)
-        self.do_bet(sb_player, bet_sb)
-        
-        self.max_bet_current_stage = bet_bb
-        self.last_bet_size = bet_bb
-        self.min_raise_amount = bet_bb # Il rilancio minimo deve essere l'importo del BB.
-
-        # 5. Imposta il turno (il giocatore dopo il BB)
-        self.turn_index = get_next_active_player_index(big_blind_index)
-        self.turn_id = self.players[self.turn_index].id
-
-        return True, f"Mano iniziata. Dealer: {self.players[self.dealer_index].name}, Turno: {self.players[self.turn_index].name}."
-    
-    
-    def do_bet(self, player: Player, amount: int):
-        """Logica interna per la puntata/rilancio/chiamata."""
-        
-        # Quanto il giocatore ha già messo in questo giro
-        already_bet = player.bet_current_stage
-        
-        # Calcola l'importo da prelevare dai chips
-        bet_delta = min(amount, player.chips + already_bet) # Non può puntare più di quanto ha in chips + quanto ha già puntato (per l'all-in)
-        
-        # Se il giocatore va All-in
-        if player.chips <= bet_delta - already_bet:
-            bet_delta = player.chips + already_bet
-            player.is_all_in = True
-            player.chips = 0
-        else:
-            player.chips -= (bet_delta - already_bet)
-        
-        # Aggiorna i totali
-        player.bet_current_stage = bet_delta
-        player.bet_total_hand += (bet_delta - already_bet)
-        self.pot += (bet_delta - already_bet)
-        
-        return bet_delta
-
-
-    def get_next_active_index(self, start_index: int) -> Optional[int]:
-        """Trova l'indice del prossimo giocatore attivo (in_hand AND not is_all_in) a partire da start_index."""
-        num_players = len(self.players)
-        # Cerca il giocatore successivo, ciclando il tavolo
-        for i in range(1, num_players + 1):
-            next_idx = (start_index + i) % num_players
-            p = self.players[next_idx]
-            # Il prossimo giocatore di turno deve essere in mano (non fold) e non all-in
-            if p.in_hand and not p.is_all_in:
-                return next_idx
-        # Se non si trova nessuno, significa che il giro è finito (o tutti fold/all-in)
-        return None
-    
-    def is_betting_round_complete(self) -> bool:
-        """Verifica se il giro di puntate è completo."""
-        
-        # Giocatori attivi (non fold e non all-in)
-        active_players = [p for p in self.players if p.in_hand and not p.is_all_in]
-
-        # Se solo un giocatore ha i chips ed è attivo (gli altri fold/all-in)
-        if len(active_players) <= 1:
-            return True # Il giro è finito.
-
-        # Controlla se tutti i giocatori attivi hanno eguagliato la puntata massima
-        all_called = True
+    # --- Stato pubblico ---
+    def public_state(self,player_id)->Dict:
+        """Ritorna lo stato del gioco per un giocatore specifico."""
+        players_public=[]
         for p in self.players:
-            if p.in_hand and not p.is_all_in:
-                # Tutti i giocatori attivi devono aver messo l'importo massimo
-                if p.bet_current_stage < self.max_bet_current_stage:
-                    # Se c'è un giocatore attivo che non ha ancora chiamato la puntata massima, il giro continua.
-                    all_called = False
-                    break
-        
-        # Se tutti gli attivi hanno eguagliato, ma l'azione è tornata al PUNTATORE ORIGINALE (per il pre-flop post-blind)
-        # o se tutti gli attivi hanno agito e la max_bet è eguagliata.
-        if all_called:
-            # Regola speciale per il pre-flop: l'azione non si ferma se il BB è il puntatore massimo e gli altri hanno limpato/foldato
-            # Ma nella nostra implementazione semplificata, consideriamo che se tutti gli attivi hanno eguagliato la max_bet, il giro è concluso.
-            return True
-
-        # Se c'è una puntata/rilancio (max_bet > 0) e non tutti hanno chiamato, il giro continua
-        return False
-
-
-    def advance_turn_or_stage(self) -> Optional[str]:
-        """Avanza il turno al prossimo giocatore o passa alla fase successiva."""
-
-        # 1. Tenta di trovare il prossimo giocatore di turno
-        next_turn_index = self.get_next_active_index(self.turn_index)
-        
-        if next_turn_index is not None:
-            # Trovato il prossimo giocatore, ma...
-            # Verifichiamo se il giro di puntate è completo PRIMA di assegnare il turno
-            if self.is_betting_round_complete():
-                # Il giro è completo, passa alla fase successiva
-                return self._advance_stage()
-            else:
-                # Il giro non è completo, passa il turno al giocatore successivo
-                self.turn_index = next_turn_index
-                self.turn_id = self.players[self.turn_index].id
-                return None # Turno avanzato
-        else:
-            # Nessun giocatore attivo rimanente (tutti fold/all-in)
-            # Il giro di puntate è terminato.
-            return self._advance_stage()
-
-
-    def _advance_stage(self) -> Optional[str]:
-        """Avanza alla fase successiva del gioco (Flop, Turn, River, Showdown)."""
-        
-        # Reset delle puntate correnti per la nuova fase
-        for p in self.players:
-            p.bet_current_stage = 0
-            p.last_action = None
+            # Le carte sono rivelate al giocatore attuale O se la fase è "showdown"
+            reveal=(p.id==player_id) or self.stage=="showdown"
+            players_public.append(p.to_public(reveal=reveal))
             
-        self.max_bet_current_stage = 0
-        self.last_bet_size = 0
-        self.min_raise_amount = 0
-        
-        # Gestione del cambio di fase
-        if self.stage == "Pre-flop":
-            # Flop (3 carte)
-            self.community.extend(self.deck.deal(3))
-            self.stage = "Flop"
-        elif self.stage == "Flop":
-            # Turn (1 carta)
-            self.community.extend(self.deck.deal(1))
-            self.stage = "Turn"
-        elif self.stage == "Turn":
-            # River (1 carta)
-            self.community.extend(self.deck.deal(1))
-            self.stage = "River"
-        elif self.stage == "River":
-            # Showdown
-            self.stage = "Showdown"
-            self.turn_id = None
-            return "Showdown" # La mano finisce
-        
-        # Imposta il turno per la nuova fase:
-        # Dopo il pre-flop, l'azione inizia dal primo giocatore attivo dopo il dealer (Small Blind)
-        
-        def get_first_to_act_index():
-            # Il primo a parlare è il primo giocatore attivo (in_hand and not all_in) dopo il dealer
-            return self.get_next_active_index(self.dealer_index)
+        turn_id = None
+        turn_name = None
 
-        # Trova il primo giocatore attivo per il nuovo giro
-        self.turn_index = get_first_to_act_index()
-        if self.turn_index is not None:
-            self.turn_id = self.players[self.turn_index].id
-        else:
-            # Tutti i giocatori sono fold o all-in, si va direttamente allo showdown
-            self.stage = "Showdown"
-            self.turn_id = None
-            return "Showdown"
-        
-        return f"Passaggio alla fase: {self.stage}" # Fase avanzata
-
-
-    def do_action(self, player_id: str, action: str, amount: int = 0) -> Tuple[bool, str, Optional[str]]:
-        """Esegue un'azione (fold, check, call, raise)."""
-        if self.stage == "Showdown" or not self.turn_id:
-            return False, "La mano è finita.", None
-        
-        if player_id != self.turn_id:
-            return False, "Non è il tuo turno.", None
+        # FIX: Controlliamo esplicitamente l'indice e lo stato
+        # turn_idx deve essere un indice valido (>=0) e la fase non deve essere showdown
+        if (self.players and self.started and self.stage!="showdown" and 
+            0 <= self.turn_idx < len(self.players)):
             
-        player = self.players[self.turn_index]
-        
-        if not player.in_hand or player.is_all_in:
-            return False, "Non puoi agire (fold o all-in).", None
+            turn_player = self.players[self.turn_idx]
+            turn_id = turn_player.id
+            turn_name = turn_player.name
+            
+        # Estraiamo le carte della community in formato stringa breve
+        community_card_strings = [repr(c) for c in self.community]
 
-        # Quanto deve chiamare per eguagliare la puntata massima
-        to_call = self.max_bet_current_stage - player.bet_current_stage
-        
-        action = action.lower()
-        
-        if action == "fold":
-            player.in_hand = False
-            player.last_action = "Fold"
-            
-            # Controlla se rimane un solo giocatore in mano
-            active_in_hand = [p for p in self.players if p.in_hand]
-            if len(active_in_hand) <= 1:
-                # Assegna il piatto e termina la mano immediatamente
-                winner = active_in_hand[0]
-                winner.chips += self.pot
-                self.pot = 0
-                self.turn_id = None
-                self.stage = "Finished"
-                return True, f"{winner.name} vince il piatto ({winner.chips} chips) per fold degli avversari.", "Showdown"
-            
-        elif action == "check":
-            # AZIONE CORRETTA PER IL CHECK:
-            # Il check è permesso SOLO se non c'è una puntata da eguagliare (to_call == 0)
-            if to_call > 0:
-                return False, f"Non puoi fare check. Devi eguagliare {to_call} chips.", None
-            
-            player.last_action = "Check"
-
-        elif action == "call":
-            if to_call == 0:
-                # Chiamare una puntata di 0 è essenzialmente un check
-                player.last_action = "Check"
-            elif to_call > 0:
-                call_amount = min(to_call, player.chips) # Non puoi chiamare più di quanto hai
-                self.do_bet(player, player.bet_current_stage + call_amount)
-                player.last_action = "Call"
-            else:
-                return False, "La puntata da eguagliare è già coperta.", None
-
-        elif action == "raise":
-            if amount < 0:
-                return False, "L'importo del rilancio non può essere negativo.", None
-                
-            current_bet = player.bet_current_stage
-            
-            # L'importo totale della puntata del giocatore dopo il rilancio
-            total_bet_after_raise = current_bet + amount
-            
-            # L'importo della puntata che il giocatore deve mettere OLTRE la puntata attuale
-            # Esempio: max_bet=100, player_bet=50. Deve mettere 50 per chiamare + l'importo del rilancio.
-            # L'importo del rilancio è l'incremento sulla max_bet, non l'importo totale.
-            
-            # Importo minimo del rilancio (almeno l'importo dell'ultima puntata/rilancio)
-            # Se nessuno ha puntato, min_raise_amount = 0, il rilancio minimo è BB (es. 20)
-            min_raise = self.last_bet_size if self.last_bet_size > 0 else 20
-            
-            # L'importo totale che il giocatore sta puntando (current_bet + amount) deve essere
-            # almeno (max_bet_current_stage + min_raise)
-            
-            # Se to_call > 0, l'incremento di rilancio deve essere di almeno min_raise,
-            # quindi l'importo totale della puntata deve essere almeno max_bet_current_stage + min_raise
-            required_total_bet = self.max_bet_current_stage + min_raise
-            
-            if total_bet_after_raise < required_total_bet and player.chips > to_call:
-                 # Se il giocatore ha chips sufficienti per un rilancio legale, ma non lo fa
-                 # Se il giocatore è all-in, la puntata non è un rilancio completo e non resetta l'azione.
-                 # Per semplicità, in questa demo, non permettiamo rilanci non full-raise
-                 return False, f"Rilancio non valido. Il rilancio deve portare la tua puntata totale a almeno {required_total_bet} (attuale max: {self.max_bet_current_stage} + min_raise: {min_raise}).", None
-            
-            if total_bet_after_raise > player.chips + current_bet:
-                return False, "Non hai chips sufficienti per questo rilancio.", None
-
-            # Calcola la dimensione del rilancio (differenza tra la nuova max_bet e la vecchia max_bet)
-            # Solo se è un vero rilancio (nuova puntata > max_bet_current_stage)
-            
-            new_max_bet = self.do_bet(player, total_bet_after_raise)
-            player.last_action = "Raise"
-            
-            if new_max_bet > self.max_bet_current_stage:
-                # È un vero rilancio, aggiorna lo stato del gioco
-                self.last_bet_size = new_max_bet - self.max_bet_current_stage
-                self.max_bet_current_stage = new_max_bet
-                
-                # Se è un rilancio, l'azione deve tornare a TUTTI i giocatori non all-in,
-                # quindi il giro continua fino a quando non hanno chiamato il nuovo max_bet.
-
-        else:
-            return False, "Azione non valida.", None
-
-        # 4. Avanza il turno o la fase
-        stage_change_msg = self.advance_turn_or_stage()
-        
-        return True, f"{player.name} ha fatto {player.last_action}.", stage_change_msg
-
-
-    def public_state(self, player_id: Optional[str] = None) -> Dict:
-        """Restituisce lo stato del gioco per un determinato giocatore (per nascondere le carte)."""
-        player_turn = self.players[self.turn_index] if self.turn_index != -1 else None
-
-        # Trova il 'to_call' per il giocatore che sta richiedendo lo stato, se è il suo turno
-        to_call = 0
-        if player_id and self.turn_id == player_id:
-            my_player = next((p for p in self.players if p.id == player_id), None)
-            if my_player:
-                 to_call = self.max_bet_current_stage - my_player.bet_current_stage
-
-
-        state = {
-            "started": self.started,
-            "stage": self.stage,
-            "pot": self.pot,
-            "community": [c.to_dict() for c in self.community],
-            "turn_id": self.turn_id,
-            "turn_name": player_turn.name if player_turn else "Nessuno",
-            "max_bet_current_stage": self.max_bet_current_stage,
-            "to_call": to_call, # Solo rilevante se è il mio turno
-            "players": [p.to_dict(include_hole=(p.id == player_id or self.stage == "Showdown")) for p in self.players],
+        return {
+            "players":players_public,
+            "community":[c.to_dict() for c in self.community],
+            "community_ascii": Card.draw_hand(community_card_strings), # NUOVO CAMPO
+            "pot":self.pot,
+            "stage":self.stage,
+            "dealer_idx":self.dealer_idx,
+            "current_bet":self.current_bet,
+            # Campo da usare nel client per il nome
+            "turn_id":turn_id,
+            "turn_name":turn_name, 
+            "hand_started":self.started,
+            "required_call": self.current_bet - (self.find_player(player_id).current_bet if self.find_player(player_id) else 0)
         }
-        return state
-
-
-    def resolve_hand(self) -> List[Dict]:
-        """Determina i vincitori e divide il piatto (semplificato, senza side pot)."""
-        if self.stage != "Showdown":
-            return []
-            
-        # Logica Side Pot (Semplificata)
-        # Identifica tutti i giocatori che hanno messo soldi nel piatto e sono in mano
-        contributors = sorted(
-            [p for p in self.players if p.bet_total_hand > 0 and p.in_hand],
-            key=lambda p: p.bet_total_hand
-        )
-
-        pots = []
-        total_payout = 0
         
-        # Inizia il side pot processing
-        while contributors:
-            # Il giocatore con il più piccolo bet_total_hand definisce la cap per questo pot
-            cap = contributors[0].bet_total_hand
-            current_pot_size = 0
-            eligible_players = []
+    def get_next_player_in_hand_idx(self, current_idx: int) -> int:
+        n = len(self.players)
+        # Iniziamo dal prossimo dopo il giocatore corrente
+        start_idx = (current_idx + 1) % n
+        for i in range(n):
+            idx = (start_idx + i) % n
+            p = self.players[idx]
+            # Deve essere in mano E non All-in se ha già matchato la puntata corrente
+            if p.in_hand and not (p.all_in and p.current_bet == self.current_bet):
+                return idx
+        return -1 
 
-            # Calcola l'importo che ogni giocatore ha contribuito al pot attuale
-            for p in contributors:
-                contribution = min(cap, p.bet_total_hand)
-                p.bet_total_hand -= contribution
-                current_pot_size += contribution
-                eligible_players.append(p)
+    # --- Logica Turno e Avanzamento (non modificata) ---
 
-            if current_pot_size > 0:
-                pots.append({
-                    "size": current_pot_size,
-                    "cap": cap,
-                    "eligible": eligible_players
-                })
+    def all_but_one_folded(self):
+        inplay=[p for p in self.players if p.in_hand]
+        return len(inplay)<=1
+
+    def is_betting_round_over(self):
+        if self.all_but_one_folded(): return True
             
-            # Rimuovi i giocatori che non hanno più chips da contribuire
-            contributors = [p for p in contributors if p.bet_total_hand > 0]
+        active_in_hand = [p for p in self.players if p.in_hand]
+        
+        # Giocatori che DEVONO agire (non foldati e non All-in che hanno già matchato)
+        # must_act: non foldato E (o non è all-in OPPURE la sua puntata è minore di current_bet)
+        must_act = [p for p in active_in_hand if not (p.all_in and p.current_bet == self.current_bet)]
+        
+        if not must_act:
+            # Tutti gli attivi sono All-in o hanno matchato All-in. Round finito.
+            return True
+        
+        # Controlla se tutti gli attivi rimanenti (quelli che non sono All-in e matchati)
+        # hanno matchato la puntata corrente.
+        all_active_matched_bet = all(p.current_bet == self.current_bet for p in must_act)
+        
+        if not all_active_matched_bet: return False 
+        
+        # Requisito di Ciclo Completo: 
+        # Se tutti hanno matchato, dobbiamo assicurarci che il turno sia tornato all'ultimo raiser/starter.
+        
+        # Controlliamo il prossimo giocatore ad agire
+        next_idx = self.get_next_player_in_hand_idx(self.turn_idx)
+        
+        # Caso 1: Nessun raise e siamo tornati all'iniziatore (solo check)
+        if self.current_bet == 0 and self.stage != "preflop":
+             # Se il prossimo ad agire sarebbe l'iniziatore del round (o se non c'è più nessuno da far agire), il round è finito.
+             # Qui si è semplificato il check: se tutti i 'must_act' hanno puntato uguale a current_bet (che è 0), il round è finito
+             # perché tutti hanno fatto check/fold (gestito sopra).
+             return all_active_matched_bet
+
+        # Caso 2: C'è stato un raise (current_bet > 0)
+        if self.current_bet > 0:
+            # Se tutti gli attivi in mano hanno matchato la puntata corrente (incluso il raiser stesso che ha stabilito la puntata)
+            # il round è finito. must_act contiene solo chi *deve* agire; se è vuoto (gestito sopra) o tutti hanno puntato uguale,
+            # significa che tutti hanno avuto il loro turno dall'ultimo raise.
+            return all_active_matched_bet
+        
+        return False # Default: round non finito
+
+    def get_first_to_act_post_flop(self):
+        n = len(self.players)
+        start_pos = (self.dealer_idx + 1) % n
+        
+        for i in range(n):
+            idx = (start_pos + i) % n
+            p = self.players[idx]
+            # Primo a parlare: in mano e non all-in e non foldato
+            if p.in_hand and not p.all_in:
+                return idx
+        return -1 
+
+    def advance_stage(self) -> Optional[Tuple[bool, str]]:
+        self.flush_current_bets_to_pot()
+        
+        if self.stage=="preflop":
+            if self.deck: self.community.extend(self.deck.draw(3)); self.stage="flop"
+        elif self.stage=="flop":
+            if self.deck: self.community.extend(self.deck.draw(1)); self.stage="turn"
+        elif self.stage=="turn":
+            if self.deck: self.community.extend(self.deck.draw(1)); self.stage="river"
+        elif self.stage=="river":
+            self.stage="showdown"
+        
+        # Reset delle puntate per il nuovo round
+        self.current_bet=0
+        self.last_raiser_idx=-1
+        self.last_raise_amount=self.bb
+        
+        if self.stage=="showdown":
+            # La mano è finita, assegna i piatti e imposta il flag risolto
+            results = self.collect_pots_and_award()
+            self.is_hand_resolved = True 
+            self.turn_idx = -1 # <--- FIX: Resetta il turno quando la mano è risolta
+            return True, f"Showdown! Risultati: {results}"
+
+        # Determina il primo giocatore ad agire post-flop
+        first_to_act_idx = self.get_first_to_act_post_flop()
+        
+        if first_to_act_idx == -1:
+             # Nessuno attivo non all-in, avanza forzatamente le carte e imposta showdown
+             while len(self.community) < 5:
+                 if self.deck: self.community.extend(self.deck.draw(1))
+             self.stage = "showdown"
+             results = self.collect_pots_and_award()
+             self.is_hand_resolved = True
+             self.turn_idx = -1 # <--- FIX: Resetta il turno quando la mano è risolta
+             return True, f"Showdown forzato! Risultati: {results}"
+
+        self.turn_idx = first_to_act_idx
+        self.initial_bet_round_starter_idx = first_to_act_idx
+        return None 
+
+    # --- Azioni giocatore ---
+    def check_and_advance_stage_if_round_over(self, action_description):
+        # 1. Caso Mano Terminata (Solo 1 in mano)
+        if self.all_but_one_folded():
+            self.stage = "showdown" 
+            self.flush_current_bets_to_pot()
+            results=self.collect_pots_and_award()
+            self.is_hand_resolved = True 
+            self.turn_idx = -1 
+            return True,f"{action_description}. Mano terminata per fold. Risultati:{results}"
+
+        # 2. Caso Round Terminati (tutti chiamati/checkati)
+        if self.is_betting_round_over():
+            # Avanza di fase e gestisci il risultato se Showdown
+            result_tuple = self.advance_stage()
+            if result_tuple:
+                return result_tuple 
+            else:
+                return True, action_description + f". Avanzamento a {self.stage}"
+        
+        # 3. Caso Round Continua
+        next_idx = self.get_next_player_in_hand_idx(self.turn_idx)
+        
+        if next_idx != -1:
+            self.turn_idx = next_idx
+            return True, action_description
+        else:
+            # Fallback per gestire round finiti non intercettati da is_betting_round_over
+            return self.advance_stage() or (True, action_description + ". Avanzamento di fase forzato.")
+
+    def player_action(self,player_id,action,amount=0)->Tuple[bool,str]:
+        p=self.find_player(player_id)
+        if not p: return False,"Player non trovato"
+        if not p.in_hand: return False,"Hai già foldato"
+        if not self.started: return False,"Mano non iniziata"
+        if self.stage=="showdown" or self.is_hand_resolved: return False,"La mano è finita (showdown), avviare la prossima."
+        
+        # Controllo indice valido prima di accedere a self.players
+        if not (0 <= self.turn_idx < len(self.players)):
+            return False,"Errore di stato: Turno non valido (indice fuori limite)"
             
+        if self.players[self.turn_idx].id!=player_id: return False,"Non è il tuo turno"
+        if p.all_in: return False,"Sei All-in, non puoi agire"
+        
+        action=action.lower()
+        to_call=self.current_bet-p.current_bet
+        
+        # --- FOLD ---
+        if action=="fold":
+            p.in_hand=False
+            return self.check_and_advance_stage_if_round_over("Fold")
+            
+        # --- CHECK ---
+        if action=="check":
+            if to_call>0: return False,"Non puoi checkare se c'è da chiamare/puntare"
+            return self.check_and_advance_stage_if_round_over("Check")
+            
+        # --- CALL ---
+        if action=="call":
+            if to_call<=0 and self.current_bet>0: return False,"Non c'è nulla da chiamare"
+            if to_call<0: to_call=0 
+            
+            put=min(to_call,p.chips)
+            
+            p.chips-=put
+            p.current_bet+=put
+            p.total_contribution+=put 
+            if p.chips==0: p.all_in=True
+            
+            return self.check_and_advance_stage_if_round_over(f"Call {put}")
+            
+        # --- RAISE ---
+        if action=="raise":
+            if amount<=0: return False,"Importo raise non valido"
+            
+            min_raise_required = self.last_raise_amount 
+            total_bet_to_be = amount 
+            total_put = total_bet_to_be - p.current_bet
+            
+            if total_put < to_call:
+                return False, f"La tua puntata totale ({total_bet_to_be}) non copre l'importo da chiamare ({self.current_bet})."
+
+            new_raise_amount = total_bet_to_be - self.current_bet
+            
+            # 1. Se non è un All-in, deve rispettare il min_raise
+            if total_put < p.chips and new_raise_amount < min_raise_required:
+                 return False, f"Raise troppo piccolo. Il rilancio deve essere almeno {min_raise_required} oltre la puntata corrente ({self.current_bet})."
+            
+            # 2. Gestione All-in (se l'importo richiesto supera o è uguale alle chips)
+            if total_put >= p.chips:
+                # E' un All-in, usa tutte le chips
+                total_put = p.chips
+                total_bet_to_be = p.current_bet + total_put
+                new_raise_amount = total_bet_to_be - self.current_bet
+                
+                # Un All-in è considerato un raise valido anche se è un sottorilancio (Shorthanded All-in),
+                # A meno che non sia inferiore al call. La validazione del call è già sopra.
+            
+            old_current_bet = self.current_bet
+            
+            # Effettua la puntata
+            p.chips-=total_put
+            p.current_bet=total_bet_to_be
+            p.total_contribution+=total_put 
+
+            if p.chips==0: p.all_in=True
+            
+            # Aggiornamento puntata corrente e raiser solo se c'è stato un vero raise
+            # L'ultimo raise è l'importo del rilancio effettuato O la dimensione del rilancio All-in.
+            if new_raise_amount > 0:
+                self.last_raise_amount = new_raise_amount
+                self.current_bet = p.current_bet
+                self.last_raiser_idx = self.turn_idx
+            
+            return self.check_and_advance_stage_if_round_over(f"Raise {total_put} (totale: {p.current_bet})")
+            
+        return False,"Azione non riconosciuta"
+
+    # --- Distribuzione Vincite (non modificata) ---
+    def collect_pots_and_award(self):
+        inplay_with_contribution=[p for p in self.players if p.total_contribution>0]
         all_results = []
         
-        # Risolvi ogni pot (dal più piccolo/principale al più grande/side)
+        if not inplay_with_contribution:
+            return [{"winner_name": "Nessuno", "amount": 0, "hand": "No Contributi"}]
+
+        # Caso di vincita per fold (un solo giocatore in mano)
+        inplay_no_fold = [p for p in self.players if p.in_hand]
+        if len(inplay_no_fold) == 1:
+            winner = inplay_no_fold[0]
+            amt = sum(p.total_contribution for p in self.players)
+            winner.chips += amt
+            self.pot = 0
+            return [{"winner_name": winner.name, "amount": amt, "hand": "Unico Rimasto"}]
+
+        # Logica Side Pot...
+        contribution_caps = sorted(list(set(p.total_contribution for p in inplay_with_contribution)))
+        pots = []
+        previous_cap = 0
+        
+        for cap in contribution_caps:
+            slice_amount = cap - previous_cap
+            if slice_amount > 0:
+                eligible_players = [p for p in inplay_with_contribution if p.total_contribution >= cap]
+                pot_size = slice_amount * len(eligible_players)
+                pots.append({"size": pot_size, "eligible": [p for p in eligible_players], "cap": cap})
+            previous_cap = cap
+            
         for pot in pots:
             eligible_in_hand = [p for p in pot["eligible"] if p.in_hand]
             
@@ -565,8 +658,6 @@ class Game:
             
             for p in eligible_in_hand:
                 # Usa tutte e 5 le carte comunitarie e le 2 in mano
-                # NOTA: La funzione best_from_seven è un placeholder.
-                # Per un gioco reale servirebbe una logica di valutazione mani corretta.
                 score = best_from_seven(p.hole + self.community) 
                 
                 if score > best_score:
@@ -581,7 +672,6 @@ class Game:
             for i, w in enumerate(winners_for_pot):
                 amt = split_amount + (remainder if i == 0 else 0)
                 w.chips += amt
-                total_payout += amt
                 
                 existing_res = next((res for res in all_results if res['winner_name'] == w.name), None)
                 if existing_res:
@@ -590,8 +680,7 @@ class Game:
                     all_results.append({
                         "winner_name": w.name,
                         "amount": amt,
-                        # Assicurati che best_score[0] sia un indice valido per HAND_RANKS
-                        "hand": HAND_RANKS[best_score[0]] if 0 <= best_score[0] < len(HAND_RANKS) else "Mano Sconosciuta"
+                        "hand": HAND_RANKS[best_score[0]]
                     })
                             
         self.pot = 0
