@@ -69,13 +69,15 @@ function cardToAsciiArt(card) {
   const value = card.length > 2 ? card.substring(0, card.length - 1) : card[0];
   const suit = card[card.length - 1]; // es. 's', 'c', 'h', 'd'
 
-  let symbol;
+ let symbol;
   let colorClass;
+  
   switch (suit) {
-    case 's': symbol = '♠'; colorClass = 'card-black'; break; // Picche
-    case 'c': symbol = '♣'; colorClass = 'card-black'; break; // Fiori
-    case 'h': symbol = '♥'; colorClass = 'card-red';   break; // Cuori
-    case 'd': symbol = '♦'; colorClass = 'card-red';   break; // Quadri
+    // CAMBIARE DA MINUSCOLO (es. 's') A MAIUSCOLO (es. 'S')
+    case 'S': symbol = '♠'; colorClass = 'card-black'; break; // Picche
+    case 'C': symbol = '♣'; colorClass = 'card-black'; break; // Fiori
+    case 'H': symbol = '♥'; colorClass = 'card-red';   break; // Cuori
+    case 'D': symbol = '♦'; colorClass = 'card-red';   break; // Quadri
     default: symbol = '?'; colorClass = 'card-black'; break;
   }
 
