@@ -1,182 +1,80 @@
-let roomInput = document.getElementById("room");
-let nameInput = document.getElementById("name");
-let createBtn = document.getElementById("create");
-let joinBtn = document.getElementById("join");
-let startBtn = document.getElementById("start");
-let meDiv = document.getElementById("me");
-let playersDiv = document.getElementById("players");
-let communityDiv = document.getElementById("community");
-let controlsDiv = document.getElementById("controls");
+#!/usr/bin/env python3
+from flask import Flask, request, jsonify, render_template, send_from_directory
+from uuid import uuid4
+from game import Game
+import time
 
-let room_id = null;
-let player_id = null;
-let my_name = null;
+app = Flask(__name__, static_folder="static", template_folder="templates")
 
-createBtn.onclick = async () => {
-  let res = await fetch("/api/create_room", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({})});
-  let j = await res.json();
-  if (j.ok) { room_id = j.room_id; roomInput.value = room_id; alert("Stanza creata: " + room_id); }
-}
-joinBtn.onclick = async () => {
-  room_id = roomInput.value.trim();
-  my_name = nameInput.value.trim() || "Guest";
-  let res = await fetch("/api/join", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({room_id, name: my_name})});
-  let j = await res.json();
-  if (j.ok) {
-    player_id = j.player_id;
-    alert("Sei dentro come " + my_name);
-  } else {
-    alert("Errore: " + j.error);
-  }
-}
-startBtn.onclick = async () => {
-  if (!room_id) { alert("Inserisci room"); return; }
-  let res = await fetch("/api/start", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({room_id})});
-  let j = await res.json();
-  if (!j.ok) alert("Errore: " + j.error); else alert("Mano iniziata");
-}
+# --- Stanze in memoria: room_id -> Game ---
+rooms = {}
 
-async function poll() {
-  if (!room_id || !player_id) return;
-  let res = await fetch(`/api/state?room_id=${room_id}&player_id=${player_id}`);
-  let j = await res.json();
-  if (!j.ok) { console.log("err", j.error); return; }
-  let s = j.state;
-  renderState(s);
-}
+@app.route("/")
+def index():
+    return render_template("index.html")
 
-/**
- * Converte una carta nel formato "VALORESEME" (es. "As", "10c") in ASCII Art.
- * Se la carta è coperta (es. "XX"), mostra il dorso.
- * @param {string} card - La stringa della carta (es. "As", "10c", "XX").
- * @returns {string[]} Un array di stringhe, una per riga dell'ASCII art.
- */
-function cardToAsciiArt(card) {
-  const lines = 6; // Numero di righe per ogni carta
-  
-  if (card === "XX") {
-    // Dorso della carta (coperta)
-    return [
-      " _____ ",
-      "|#####|",
-      "|#####|",
-      "|#####|",
-      "|#####|",
-      " `-----' "
-    ];
-  }
+@app.route("/api/create_room", methods=["POST"])
+def create_room():
+    data = request.json or {}
+    max_players = int(data.get("max_players", 4))
+    room_id = str(uuid4())[:8]
+    game = Game(max_players=max_players)
+    rooms[room_id] = game
+    return jsonify({"ok": True, "room_id": room_id})
 
-  const value = card.length > 2 ? card.substring(0, card.length - 1) : card[0];
-  const suit = card[card.length - 1]; // es. 's', 'c', 'h', 'd'
+@app.route("/api/join", methods=["POST"])
+def join():
+    data = request.json or {}
+    room_id = data.get("room_id")
+    name = data.get("name") or f"Player-{str(uuid4())[:4]}"
+    if room_id not in rooms:
+        return jsonify({"ok": False, "error": "Room not found"}), 404
+    game = rooms[room_id]
+    if game.started:
+        return jsonify({"ok": False, "error": "Game already started"}), 400
+    player_id = game.add_player(name)
+    return jsonify({"ok": True, "player_id": player_id, "name": name})
 
-  let symbol;
-  let colorClass;
-  // Uso delle entità HTML numeriche per i semi
-  switch (suit) {
-    case 's': symbol = '&#9824;'; colorClass = 'card-black'; break; // Picche (♠)
-    case 'c': symbol = '&#9827;'; colorClass = 'card-black'; break; // Fiori (♣)
-    case 'h': symbol = '&#9829;'; colorClass = 'card-red'; break; // Cuori (♥)
-    case 'd': symbol = '&#9830;'; colorClass = 'card-red'; break; // Quadri (♦)
-    default: symbol = '?'; colorClass = 'card-black'; break;
-  }
+@app.route("/api/start", methods=["POST"])
+def start():
+    data = request.json or {}
+    room_id = data.get("room_id")
+    if room_id not in rooms:
+        return jsonify({"ok": False, "error": "Room not found"}), 404
+    game = rooms[room_id]
+    ok, msg = game.start_hand()
+    if not ok:
+        return jsonify({"ok": False, "error": msg}), 400
+    return jsonify({"ok": True, "msg": msg})
 
-  // Normalizza il valore per la visualizzazione (T per 10)
-  const displayValue = (value === '10' ? 'T' : value.toUpperCase()).padEnd(2, ' ');
-  
-  return [
-    `<span class="${colorClass}"> _____ </span>`,
-    `<span class="${colorClass}">|${displayValue}. |</span>`,
-    `<span class="${colorClass}">|     |</span>`, 
-    `<span class="${colorClass}">|  ${symbol}  |</span>`, 
-    `<span class="${colorClass}">|     |</span>`, 
-    `<span class="${colorClass}">|.${displayValue}|</span>`,
-  ];
-}
+@app.route("/api/state", methods=["GET"])
+def state():
+    room_id = request.args.get("room_id")
+    player_id = request.args.get("player_id")
+    if not room_id or room_id not in rooms:
+        return jsonify({"ok": False, "error": "Room not found"}), 404
+    game = rooms[room_id]
+    state = game.public_state(player_id)
+    return jsonify({"ok": True, "state": state})
 
-/**
- * Converte un array di carte nel loro blocco di ASCII Art, affiancandole.
- * @param {string[]} cards - Array di stringhe delle carte.
- * @returns {string} Il blocco HTML formattato con le carte in ASCII Art.
- */
-function cardsToAsciiBlock(cards) {
-  if (cards.length === 0) return "";
-  
-  const cardArt = cards.map(c => cardToAsciiArt(c));
-  const lines = cardArt[0].length; // Il numero di righe per carta (dovrebbe essere 6)
-  let outputHtml = '<pre style="display:inline-block; margin:0;">'; // Usa <pre> per mantenere la formattazione a spaziatura fissa
+@app.route("/api/action", methods=["POST"])
+def action():
+    data = request.json or {}
+    room_id = data.get("room_id")
+    player_id = data.get("player_id")
+    act = data.get("action")
+    amount = int(data.get("amount", 0))
+    if not room_id or room_id not in rooms:
+        return jsonify({"ok": False, "error": "Room not found"}), 404
+    game = rooms[room_id]
+    success, msg = game.player_action(player_id, act, amount)
+    if not success:
+        return jsonify({"ok": False, "error": msg}), 400
+    return jsonify({"ok": True, "msg": msg})
 
-  for (let i = 0; i < lines; i++) {
-    const line = cardArt.map(art => art[i]).join(''); // Unisce la riga i di ogni carta
-    outputHtml += line + '\n';
-  }
-  outputHtml += '</pre>';
+@app.route("/static/<path:path>")
+def send_static(path):
+    return send_from_directory("static", path)
 
-  return outputHtml;
-}
-
-
-function renderState(s) {
-  // me info
-  let my = s.players.find(p=>p.id===player_id);
-  // Ho aggiunto il blocco carte qui
-  meDiv.innerHTML = my ? `<strong>Tu: ${my.name}</strong> Chips: ${my.chips} Bets: ${my.current_bet}<br>${cardsToAsciiBlock(my.hole)}` : "Non sei in stanza";
-  
-  // players
-  playersDiv.innerHTML = "";
-  s.players.forEach(p=>{
-    // Se la mano è finita O il giocatore è ME stesso, mostro le carte. Altrimenti mostro "XX"
-    const cardsToShow = (p.id === player_id || s.stage === "SHOWDOWN" || s.stage === "END") 
-      ? p.hole 
-      : p.hole.map(() => "XX"); 
-    
-    let el = document.createElement("div");
-    el.className = "player";
-    // Aggiungo una classe per distinguere il giocatore di turno
-    if (p.id === s.turn_id) {
-      el.classList.add('current-turn');
-    }
-
-    el.innerHTML = `<div>${p.name}${p.id===s.players[s.dealer_idx]?.id ? " (**D**)" : ""}</div>
-      <div>Chips: ${p.chips}</div>
-      <div>Bet: ${p.current_bet}</div>
-      <div>Hole: ${cardsToAsciiBlock(cardsToShow)}</div>
-      <div>In mano: ${p.in_hand ? "Sì":"No"}</div>`;
-    playersDiv.appendChild(el);
-  });
-  
-  // community
-  // Ho aggiunto il blocco carte qui
-  communityDiv.innerHTML = `<h3>Community (${s.stage})</h3>` + cardsToAsciiBlock(s.community.map(c=>c.str));
-  
-  // controls if my turn
-  controlsDiv.innerHTML = "";
-  if (s.turn_id === player_id) {
-    let fold = document.createElement("button");
-    fold.innerText = "Fold"; fold.onclick = ()=>doAction("fold");
-    let check = document.createElement("button");
-    check.innerText = "Check"; check.onclick = ()=>doAction("check");
-    let call = document.createElement("button");
-    call.innerText = "Call"; call.onclick = ()=>doAction("call");
-    let raise = document.createElement("button");
-    raise.innerText = "Raise"; raise.onclick = ()=> {
-      let amt = prompt("Quanto vuoi rilanciare (numero)?");
-      if (!amt) return;
-      doAction("raise", parseInt(amt,10));
-    };
-    controlsDiv.appendChild(fold); controlsDiv.appendChild(check); controlsDiv.appendChild(call); controlsDiv.appendChild(raise);
-} else {
-  let current = s.players.find(p => p.id === s.turn_id);
-  let turnName = current ? current.name : "nessuno";
-  controlsDiv.innerHTML = `Turno di: ${turnName}`;
-}
-}
-
-async function doAction(action, amount=0) {
-  let res = await fetch("/api/action", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({room_id, player_id, action, amount})});
-  let j = await res.json();
-  if (!j.ok) alert("Errore: " + j.error); else console.log(j.msg);
-  // update quickly
-  poll();
-}
-
-setInterval(poll, 1000);
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
